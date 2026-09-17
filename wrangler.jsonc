@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "splito-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-17",
+  "vars": {
+    "FRONTEND_URL": "https://YOUR_GITHUB_USERNAME.github.io/splito"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "splito-db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+    }
+  ]
+}

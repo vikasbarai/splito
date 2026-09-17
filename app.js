@@ -30,7 +30,11 @@ const esc = (s) =>
       })[c],
   );
 async function api(url, o = {}) {
-  const r = await fetch("/api" + url, {
+  const apiBase = (window.SPLITO_API_URL || "").replace(/\/$/, "");
+  if (!apiBase) {
+    throw Error("This site has not been configured with its Cloudflare Worker URL.");
+  }
+  const r = await fetch(apiBase + "/api" + url, {
     ...o,
     headers: {
       "Content-Type": "application/json",

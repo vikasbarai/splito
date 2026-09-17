@@ -1,46 +1,74 @@
-# Splito — shared expense splitting
+# Splito
 
-Splito is a full-stack expense-sharing application: accounts, shared groups, member-only access, expense history, equal splits (down to the cent), live group balances, recorded settlements, and shareable invite links.
+Splito is a shared-expense application deployed as a static GitHub Pages site with a Cloudflare Worker API and Cloudflare D1 database. The browser never connects to D1 directly: it calls the Worker over HTTPS, and the Worker enforces authentication and group membership.
 
-## Run locally
+## Architecture
 
-```bash
-npm install
-npm start
+```
+GitHub Pages (index.html, app.js)  --HTTPS-->  Cloudflare Worker (worker.js)  -->  D1 (SQLite)
 ```
 
-Open `http://localhost:3000`. Create an account, create a group, then invite a friend using their email address. The app copies an invite link; the friend registers with that same email and opens the link to join.
+## One-time setup
 
-The SQLite database is created automatically in `data/splito.db`. Never commit this file.
+Prerequisites: a GitHub account, a Cloudflare account, and Node.js 20 or newer.
 
-## Configuration
+1. Install dependencies and authenticate Wrangler:
 
-Set a strong signing secret before deployment:
+   ```bash
+   npm install
+   npx wrangler login
+   ```
+
+2. Create the production D1 database:
+
+   ```bash
+   npx wrangler d1 create splito-db
+   ```
+
+   Copy the `database_id` printed by that command into `wrangler.jsonc`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
+
+3. Set your public GitHub Pages URL in `wrangler.jsonc` as `FRONTEND_URL`. For a project site it is normally `https://YOUR_GITHUB_USERNAME.github.io/splito`. This is used for CORS and invite links.
+
+4. Apply the schema to D1 and store a signing secret. Generate a unique, long value for the secret; do not commit it.
+
+   ```bash
+   npm run d1:migrate:remote
+   npx wrangler secret put JWT_SECRET
+   ```
+
+5. Deploy the API:
+
+   ```bash
+   npm run deploy:worker
+   ```
+
+   Wrangler prints a URL such as `https://splito-api.<account>.workers.dev`. Put that exact URL (without a trailing slash) in `api-config.js` as `window.SPLITO_API_URL`.
+
+6. Commit and push the repository to GitHub. In the repository, open **Settings → Pages → Build and deployment**, choose **GitHub Actions**, then push to `main`. The included workflow publishes the static site.
+
+   ```bash
+   git add .
+   git commit -m "Deploy Splito with Pages, Workers, and D1"
+   git push origin main
+   ```
+
+Open the URL shown by the GitHub Pages workflow. Register an account, create a group, and invite another user by email.
+
+## Local API development
+
+Create and migrate a local D1 database, then start the Worker:
 
 ```bash
-JWT_SECRET=replace-with-a-long-random-value
+npm run d1:migrate:local
+npx wrangler secret put JWT_SECRET --local
+npm run dev:worker
 ```
 
-## Free deployment
+For local testing, temporarily set `window.SPLITO_API_URL = "http://localhost:8787"` in `api-config.js`. Do not deploy that value.
 
-Because this is a real backend, use a host that supports Node processes (not GitHub Pages or static Netlify Drop).
+## Operational notes
 
-### Render
-
-1. Push this folder to a private GitHub repository.
-2. In [Render](https://render.com/), create a **Web Service** from the repository.
-3. Choose Node, use build command `npm install`, and start command `npm start`.
-4. Add the `JWT_SECRET` environment variable.
-5. For persistent data, attach a Render disk at `/app/data` (availability depends on the selected plan), or migrate the SQLite layer to a managed Postgres database for a production-ready free-tier setup.
-
-The included `Dockerfile` also works on Railway, Fly.io, or any Docker-capable host. If using an ephemeral host without a persistent disk, deploy the API with a managed Postgres database instead of SQLite to retain data across restarts.
-
-## API overview
-
-- `POST /api/auth/register`, `POST /api/auth/login`
-- `GET /api/dashboard`, `GET /api/groups/:groupId`
-- `POST /api/groups`, `POST /api/groups/:groupId/expenses`
-- `POST /api/groups/:groupId/invites`, `POST /api/invites/:token/accept`
-- `POST /api/groups/:groupId/settlements`
-
-All group endpoints enforce authenticated group membership.
+- `JWT_SECRET` is a Worker secret, not a Pages or GitHub secret.
+- D1 migrations live in `migrations/`; run `npm run d1:migrate:remote` whenever a new migration is added.
+- `api-config.js` is public configuration, so it must contain only the Worker URL—never credentials.
+- The legacy Express server is retained only for local backwards compatibility. GitHub Pages does not run it; production uses `worker.js`.

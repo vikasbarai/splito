@@ -67,6 +67,8 @@
     <dialog id="inviteDialog"><form method="dialog" id="inviteForm" class="modal" novalidate><div class="modal-top"><div><p class="eyebrow">INVITE A MEMBER</p><h2>Share this group</h2></div><a class="close" href="#" role="button" aria-label="Close invite popup" onclick="this.closest('dialog').close();return false">×</a></div><label>Email address<input name="email" type="email" placeholder="friend@example.com" /></label><button class="submit" value="default">Create invite link</button></form></dialog>
     <div id="authScreen" class="auth-screen"><div class="auth-card"><a class="brand dark" href="#"><span class="brand-mark">S</span><span>splito</span></a><p class="eyebrow">SHARE COSTS, NOT STRESS</p><h1>Split life together.</h1><p class="auth-copy">Create a shared account space for your roommates, trips, and every last dinner bill.</p><form id="authForm" class="auth-form"><label>Your name<input name="name" autocomplete="name" placeholder="Alex Kim" /></label><label>Email<input name="email" required type="email" autocomplete="email" placeholder="you@example.com" /></label><label>Password<input name="password" required minlength="6" type="password" autocomplete="current-password" placeholder="At least 6 characters" /></label><button class="submit" id="authSubmit">Create account</button></form><button class="text-button" id="authToggle">Already have an account? Sign in</button><p id="authError" class="auth-error"></p></div></div>
     <div id="toast" role="status"></div>
+    <!-- api-config.js is intentionally committed with a placeholder. Set it to your Worker URL before publishing. -->
+    <script src="api-config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

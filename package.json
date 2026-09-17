@@ -5,7 +5,11 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "format": "prettier --write app.js server.js"
+    "format": "prettier --write app.js worker.js server.js",
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
+    "d1:migrate:local": "wrangler d1 migrations apply splito-db --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply splito-db --remote"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -14,6 +18,7 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "prettier": "^3.9.7"
+    "prettier": "^3.9.7",
+    "wrangler": "^4.39.0"
   }
 }
