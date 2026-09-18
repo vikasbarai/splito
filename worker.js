@@ -3,9 +3,12 @@ const encoder = new TextEncoder(),
 const id = (value) => Number.parseInt(value, 10);
 
 function cors(request, env) {
+  const configuredOrigin = env.FRONTEND_URL
+    ? new URL(env.FRONTEND_URL).origin
+    : null;
   return {
     "access-control-allow-origin":
-      env.FRONTEND_URL ||
+      configuredOrigin ||
       request.headers.get("Origin") ||
       "*",
     "access-control-allow-headers":
