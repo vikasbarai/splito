@@ -22,7 +22,7 @@ Prerequisites: a GitHub account, a Cloudflare account, and Node.js 20 or newer.
 2. Create the production D1 database:
 
    ```bash
-   npx wrangler d1 create splito-db
+   npx wrangler d1 create splito
    ```
 
    Copy the `database_id` printed by that command into `wrangler.jsonc`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
