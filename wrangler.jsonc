@@ -9,7 +9,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "splito-db",
+      "database_name": "splito",
       "database_id": "1b4e05d8-077d-4dc5-b989-ea85edc7291a"
     }
   ]
