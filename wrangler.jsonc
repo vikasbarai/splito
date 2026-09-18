@@ -4,13 +4,13 @@
   "main": "worker.js",
   "compatibility_date": "2026-09-17",
   "vars": {
-    "FRONTEND_URL": "https://YOUR_GITHUB_USERNAME.github.io/splito"
+    "FRONTEND_URL": "https://vikasbarai.github.io/splito/"
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "splito-db",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+      "database_id": "1b4e05d8-077d-4dc5-b989-ea85edc7291a"
     }
   ]
 }
