@@ -1,74 +1,264 @@
 # Splito
 
-Splito is a shared-expense application deployed as a static GitHub Pages site with a Cloudflare Worker API and Cloudflare D1 database. The browser never connects to D1 directly: it calls the Worker over HTTPS, and the Worker enforces authentication and group membership.
+Splito is a shared-expense application with a static GitHub Pages frontend, a Cloudflare Worker API, and a Cloudflare D1 database. The browser only calls the Worker; it never connects to D1 directly.
 
-## Architecture
-
-```
-GitHub Pages (index.html, app.js)  --HTTPS-->  Cloudflare Worker (worker.js)  -->  D1 (SQLite)
+```text
+GitHub Pages  →  https://api.squarelab.in  →  Cloudflare Worker  →  D1
 ```
 
-## One-time setup
+## Branch and deployment flow
 
-Prerequisites: a GitHub account, a Cloudflare account, and Node.js 20 or newer.
+Use `development` for all work. Do not develop directly on `main`.
 
-1. Install dependencies and authenticate Wrangler:
+```text
+development branch → pull request → CI checks → merge to main → production deployment
+```
 
-   ```bash
-   npm install
-   npx wrangler login
+The workflows have separate responsibilities:
+
+- Pull requests to `main` run formatting and Worker bundle validation only. They do not change production.
+- A merge to `main` deploys the static frontend to GitHub Pages.
+- A merge to `main` also applies pending D1 migrations, then deploys the Worker.
+
+### Configure GitHub deployment secrets (one-time)
+
+Before automatic Worker deployment can run, add these **repository secrets** in GitHub: **Settings → Secrets and variables → Actions → New repository secret**.
+
+| Secret                  | Value                                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | A scoped Cloudflare API token allowed to deploy this Worker, apply D1 migrations, and edit Worker routes for `squarelab.in` if routing changes are committed. |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID.                                                                                                                                   |
+
+To create the token, open **Cloudflare Dashboard → My Profile → API Tokens → Create Token → Create Custom Token**. Under **Developer Platform**, grant **Workers → Editor** and scope it to the existing `splito-api` Worker when the dashboard offers that choice. Also grant **D1 → Editor** for the `splito` database. If the D1 selector uses the older permission names, select **Account → D1 → Edit** instead. Add **Zone → Workers Routes → Edit** for `squarelab.in` only if you later manage the custom domain in `wrangler.jsonc`. Do not select the legacy **Workers Scripts → Edit** permission. Copy the account ID from the Cloudflare dashboard's account overview and save both values as the GitHub repository secrets above.
+
+When creating the GitHub secrets, paste the values as follows:
+
+```text
+Name:   CLOUDFLARE_API_TOKEN
+Secret: the full Cloudflare API token
+```
+
+```text
+Name:   CLOUDFLARE_ACCOUNT_ID
+Secret: the Cloudflare account ID
+```
+
+These two values are used by GitHub Actions only. Do **not** put either value in `.dev.vars`, `.env`, `wrangler.jsonc`, `api-config.js`, or source code.
+
+### Where each secret belongs
+
+| Value                   | Store it in                                                             | Do not store it in                          |
+| ----------------------- | ----------------------------------------------------------------------- | ------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | GitHub repository Actions secret                                        | Any local or committed file                 |
+| `CLOUDFLARE_ACCOUNT_ID` | GitHub repository Actions secret                                        | Any local or committed file                 |
+| Production `JWT_SECRET` | Cloudflare Worker secret, set with `npx wrangler secret put JWT_SECRET` | GitHub, frontend files, or `wrangler.jsonc` |
+| Local `JWT_SECRET`      | Your ignored `.dev.vars` file                                           | GitHub or production Cloudflare secrets     |
+
+GitHub Actions requires the two GitHub secrets above. Local development requires only the two values in `.dev.vars`.
+
+## Local development
+
+### Prerequisites
+
+- Node.js 20 or later
+- npm
+
+Install dependencies once:
+
+```powershell
+npm install
+```
+
+### Start the local environment
+
+1. Create your local-only environment file from the template:
+
+   ```powershell
+   Copy-Item .dev.vars.example .dev.vars
    ```
 
-2. Create the production D1 database:
+2. Open `.dev.vars` and replace the placeholder `JWT_SECRET` with any long random local-only value. Leave `FRONTEND_URL` as `http://localhost:8000`.
 
-   ```bash
-   npx wrangler d1 create splito
+   `.dev.vars` is ignored by Git and must never contain the production secret.
+
+3. Create or update the local D1 schema:
+
+   ```powershell
+   npm run d1:migrate:local
    ```
 
-   Copy the `database_id` printed by that command into `wrangler.jsonc`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
+4. In terminal one, start the local Worker:
 
-3. Set your public GitHub Pages URL in `wrangler.jsonc` as `FRONTEND_URL`. For a project site it is normally `https://YOUR_GITHUB_USERNAME.github.io/splito`. This is used for CORS and invite links.
-
-4. Apply the schema to D1 and store a signing secret. Generate a unique, long value for the secret; do not commit it.
-
-   ```bash
-   npm run d1:migrate:remote
-   npx wrangler secret put JWT_SECRET
+   ```powershell
+   npm run dev:worker
    ```
 
-5. Deploy the API:
+   The Worker listens at `http://localhost:8787` and uses a local D1 database. It does not access production D1.
 
-   ```bash
-   npm run deploy:worker
+   On a corporate network, Wrangler may warn that it cannot fetch `Request.cf` because the proxy certificate is untrusted. Local development still works when it finishes with `Ready on http://127.0.0.1:8787`; resolve the proxy certificate only when you need to deploy or access remote Cloudflare resources.
+
+5. In terminal two, start the static site:
+
+   ```powershell
+   npm run dev:site
    ```
 
-   Wrangler prints a URL such as `https://splito-api.<account>.workers.dev`. Put that exact URL (without a trailing slash) in `api-config.js` as `window.SPLITO_API_URL`.
+6. Open [http://localhost:8000](http://localhost:8000). `api-config.js` automatically uses `http://localhost:8787` on localhost and `https://api.squarelab.in` everywhere else.
 
-6. Commit and push the repository to GitHub. In the repository, open **Settings → Pages → Build and deployment**, choose **GitHub Actions**, then push to `main`. The included workflow publishes the static site.
+You can register accounts and create expenses locally without changing production data. Local D1 state persists under `.wrangler/` between runs.
 
-   ```bash
-   git add .
-   git commit -m "Deploy Splito with Pages, Workers, and D1"
-   git push origin main
-   ```
+### Recreate local development on a new machine
 
-Open the URL shown by the GitHub Pages workflow. Register an account, create a group, and invite another user by email.
+Everything needed to rebuild the local environment is committed to Git except the local secret and local test data. If your laptop is replaced, reset, or loses its files:
 
-## Local API development
+```powershell
+git clone https://github.com/vikasbarai/splito.git
+cd splito
+git checkout development
+npm ci
+Copy-Item .dev.vars.example .dev.vars
+```
 
-Create and migrate a local D1 database, then start the Worker:
+Open `.dev.vars`, set a new long local-only `JWT_SECRET`, then recreate the local D1 schema and start both servers:
 
-```bash
+```powershell
 npm run d1:migrate:local
-npx wrangler secret put JWT_SECRET --local
 npm run dev:worker
 ```
 
-For local testing, temporarily set `window.SPLITO_API_URL = "http://localhost:8787"` in `api-config.js`. Do not deploy that value.
+In a second terminal:
 
-## Operational notes
+```powershell
+npm run dev:site
+```
 
-- `JWT_SECRET` is a Worker secret, not a Pages or GitHub secret.
-- D1 migrations live in `migrations/`; run `npm run d1:migrate:remote` whenever a new migration is added.
-- `api-config.js` is public configuration, so it must contain only the Worker URL—never credentials.
-- The legacy Express server is retained only for local backwards compatibility. GitHub Pages does not run it; production uses `worker.js`.
+Open `http://localhost:8000`.
+
+### What to save separately
+
+Do not commit the following local-only files. They are intentionally ignored by Git:
+
+| File or folder  | Contains                                               | Keep a separate backup?                                                                                                                                  |
+| --------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.dev.vars`     | Local JWT secret and localhost configuration           | Optional. Save the secret in a password manager only if you want the same local sign-in tokens after restoring a machine. A new local secret also works. |
+| `.wrangler/`    | Local D1 database and test users, groups, and expenses | Optional. Normally disposable. Export only if you need to preserve local test data.                                                                      |
+| `node_modules/` | Installed dependencies                                 | No. Run `npm ci` to recreate it.                                                                                                                         |
+
+To preserve local D1 test data, create an export and store it only in private, encrypted storage:
+
+```powershell
+npx wrangler d1 export splito --local --output=./local-d1-backup-YYYYMMDD.sql
+```
+
+Do not commit the export; it can contain user data and password hashes. Production data is separate: it remains in Cloudflare D1, while the production `JWT_SECRET` remains in Cloudflare and the deployment credentials remain GitHub Actions secrets.
+
+## Backup and restore
+
+### Back up production D1
+
+Create a full schema-and-data backup before substantial database changes and periodically while the application has real data:
+
+```powershell
+npx wrangler d1 export splito --remote --output=./splito-production-backup-YYYYMMDD.sql
+```
+
+Keep the resulting file in private, encrypted storage. It contains all application data, including email addresses and password hashes. The file is ignored by Git and must never be committed or shared publicly.
+
+### Restore local D1 test data
+
+Only restore a backup into an empty local D1 database. First stop `npm run dev:worker`, then move the `.wrangler` folder out of the project with File Explorer if you want to keep its current local state. Next import the backup:
+
+```powershell
+npx wrangler d1 execute splito --local --file=./local-d1-backup-YYYYMMDD.sql
+```
+
+Start the Worker again with `npm run dev:worker`. This changes only local test data; it never changes production D1.
+
+### Recover production D1
+
+Do not import a backup directly into the live production database. A production recovery is a controlled operation:
+
+1. Put the site into maintenance mode or otherwise stop users from writing new data.
+2. Create a new replacement D1 database in Cloudflare.
+3. Temporarily update `wrangler.jsonc` with the replacement database name and ID.
+4. Import the backup into the replacement database:
+
+   ```powershell
+   npx wrangler d1 execute REPLACEMENT_DATABASE_NAME --remote --file=./splito-production-backup-YYYYMMDD.sql
+   ```
+
+5. Check that its tables and important data are present.
+6. Deploy the Worker using the updated D1 binding:
+
+   ```powershell
+   npm run deploy:worker
+   ```
+
+7. Test registration, group creation, and existing-user login before reopening the site to users.
+
+Keep the old D1 database untouched until the replacement has been confirmed. For a production incident, take a fresh backup of the current database before changing its binding whenever possible.
+
+### Local checks
+
+Run these before committing:
+
+```powershell
+npm run check
+npx wrangler deploy --dry-run
+git diff --check
+```
+
+The dry run validates the Worker bundle only; it does not deploy or access production D1.
+
+## Database migrations
+
+Create a migration whenever the database schema changes:
+
+```powershell
+npx wrangler d1 migrations create splito describe-the-change
+```
+
+Test it locally:
+
+```powershell
+npm run d1:migrate:local
+```
+
+After the pull request is merged, the production Worker workflow applies pending migrations before deploying the Worker. Do not manually run `npm run d1:migrate:remote` for normal changes once GitHub deployment is configured.
+
+## Publish a change
+
+1. Confirm you are working on `development`:
+
+   ```powershell
+   git branch --show-current
+   ```
+
+2. Make changes and test them locally.
+
+3. Run the local checks above, then commit and push:
+
+   ```powershell
+   git add .
+   git commit -m "Describe the change"
+   git push origin development
+   ```
+
+4. Open a pull request from `development` into `main`. Wait for **Validate pull request** to pass and review the changes.
+
+5. Merge the pull request. GitHub automatically runs:
+
+   - **Deploy static site to GitHub Pages**
+   - **Deploy Worker and D1 migrations**
+
+6. Verify production:
+
+   - [https://vikasbarai.github.io/splito/](https://vikasbarai.github.io/splito/)
+   - [https://api.squarelab.in/api/me](https://api.squarelab.in/api/me) should return `{"error":"Please sign in."}` before login.
+
+## Production configuration
+
+- [wrangler.jsonc](wrangler.jsonc) binds the Worker to the production D1 database and defines the GitHub Pages origin for CORS and invite links.
+- [api-config.js](api-config.js) contains public API URLs only. It must never contain a secret.
+- `JWT_SECRET` is stored in Cloudflare with `npx wrangler secret put JWT_SECRET`.
+- The Worker custom domain is `api.squarelab.in`. It is separate from the GitHub Pages frontend domain.

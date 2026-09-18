@@ -1,4 +1,7 @@
 node_modules/
 data/
 .env
+.dev.vars*
+local-d1-backup*.sql
+splito-production-backup*.sql
 .wrangler/

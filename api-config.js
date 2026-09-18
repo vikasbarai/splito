@@ -1,3 +1,9 @@
-// Replace this with the URL printed by: npm run deploy:worker
-// Keep the trailing slash off the URL.
-window.SPLITO_API_URL = "https://api.squarelab.in";
+// Production uses the custom API domain. Local development uses `wrangler dev`.
+const isLocalHost = [
+  "localhost",
+  "127.0.0.1",
+  "::1",
+].includes(window.location.hostname);
+window.SPLITO_API_URL = isLocalHost
+  ? "http://localhost:8787"
+  : "https://api.squarelab.in";
