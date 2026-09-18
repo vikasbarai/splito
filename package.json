@@ -11,6 +11,7 @@
     "dev:site": "http-server . -a localhost -p 8000 -c-1",
     "deploy:worker": "wrangler deploy",
     "d1:migrate:local": "wrangler d1 migrations apply splito --local",
+    "d1:seed:local": "wrangler d1 execute splito --local --file=./scripts/seed-local.sql",
     "d1:migrate:remote": "wrangler d1 migrations apply splito --remote"
   },
   "dependencies": {

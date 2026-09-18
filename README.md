@@ -47,14 +47,28 @@ These two values are used by GitHub Actions only. Do **not** put either value in
 
 ### Where each secret belongs
 
-| Value                   | Store it in                                                             | Do not store it in                          |
-| ----------------------- | ----------------------------------------------------------------------- | ------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | GitHub repository Actions secret                                        | Any local or committed file                 |
-| `CLOUDFLARE_ACCOUNT_ID` | GitHub repository Actions secret                                        | Any local or committed file                 |
-| Production `JWT_SECRET` | Cloudflare Worker secret, set with `npx wrangler secret put JWT_SECRET` | GitHub, frontend files, or `wrangler.jsonc` |
-| Local `JWT_SECRET`      | Your ignored `.dev.vars` file                                           | GitHub or production Cloudflare secrets     |
+| Value                                         | Store it in                                                             | Do not store it in                          |
+| --------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`                        | GitHub repository Actions secret                                        | Any local or committed file                 |
+| `CLOUDFLARE_ACCOUNT_ID`                       | GitHub repository Actions secret                                        | Any local or committed file                 |
+| Production `JWT_SECRET`                       | Cloudflare Worker secret, set with `npx wrangler secret put JWT_SECRET` | GitHub, frontend files, or `wrangler.jsonc` |
+| Local `JWT_SECRET`                            | Your ignored `.dev.vars` file                                           | GitHub or production Cloudflare secrets     |
+| Production `RESEND_API_KEY` and `RESEND_FROM` | Cloudflare Worker secrets                                               | GitHub, frontend files, or committed files  |
 
 GitHub Actions requires the two GitHub secrets above. Local development requires only the two values in `.dev.vars`.
+
+### Email delivery setup
+
+Password-reset links and group invitations are sent through [Resend](https://resend.com/docs) in production, so create a Resend API key and verify the sending domain first (for example, `squarelab.in`). Resend documents that a sending domain must be verified before use. Password-reset links are one-time links that expire after one hour; group invitations remain pending until the recipient accepts them.
+
+Set both production Worker secrets from the repository folder:
+
+```powershell
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put RESEND_FROM
+```
+
+For `RESEND_FROM`, use a verified sender such as `Splito <no-reply@squarelab.in>`. Do not add either value to `wrangler.jsonc` or commit it to Git. Local password-reset and group-invite flows work without Resend by displaying a local-only link. To send real emails locally, put the same two values in ignored `.dev.vars`.
 
 ## Local development
 
@@ -86,6 +100,14 @@ npm install
    ```powershell
    npm run d1:migrate:local
    ```
+
+   Optionally add sample users, groups, expenses, and a settlement:
+
+   ```powershell
+   npm run d1:seed:local
+   ```
+
+   This command affects only `.wrangler` local D1 state. It is safe to run again and adds every existing local user to the sample groups. Sign in as `alex.morgan@example.invalid`, `maya.rao@example.invalid`, `arjun.shah@example.invalid`, or `priya.kapoor@example.invalid` with password `DemoPass123!`.
 
 4. In terminal one, start the local Worker:
 

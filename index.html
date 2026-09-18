@@ -2,73 +2,1021 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
     <meta name="theme-color" content="#176b5b" />
-    <title>Splito — Share expenses, split and simply</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+    <title>Splito - Share expenses simply</title>
+    <link
+      rel="preconnect"
+      href="https://fonts.googleapis.com"
+    />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
-    <style>.auth-screen{position:fixed;z-index:10;inset:0;background:linear-gradient(125deg,#113d35,#2e806d);display:grid;place-items:center;padding:22px}.auth-card{background:#fffdf9;width:min(440px,100%);border-radius:22px;padding:38px;box-shadow:0 24px 70px #08261f66}.brand.dark{color:#183631;padding:0 0 31px}.auth-card h1{font-size:34px;margin-bottom:10px}.auth-copy{color:#647c74;line-height:1.5;margin-bottom:25px}.auth-form{display:grid;gap:14px}.auth-error{color:#b74634;font-size:12px;text-align:center;margin:12px 0 0}.auth-card .text-button{display:block;margin:17px auto 0}.auth-screen.hidden{display:none}dialog .close{position:relative;z-index:5;pointer-events:auto;cursor:pointer}</style>
+    <style>
+      .auth-screen {
+        position: fixed;
+        z-index: 10;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 22px;
+        background: linear-gradient(
+          125deg,
+          #113d35,
+          #2e806d
+        );
+      }
+      .auth-card {
+        width: min(440px, 100%);
+        padding: 38px;
+        border-radius: 22px;
+        background: #fffdf9;
+        box-shadow: 0 24px 70px #08261f66;
+      }
+      .brand.dark {
+        padding: 0 0 31px;
+        color: #183631;
+      }
+      .auth-card h1 {
+        margin-bottom: 10px;
+        font-size: 34px;
+      }
+      .auth-copy {
+        margin-bottom: 25px;
+        color: #647c74;
+        line-height: 1.5;
+      }
+      .auth-form {
+        display: grid;
+        gap: 14px;
+      }
+      .auth-error {
+        margin: 12px 0 0;
+        color: #b74634;
+        font-size: 12px;
+        text-align: center;
+      }
+      .auth-card .text-button {
+        display: block;
+        margin: 17px auto 0;
+      }
+      .auth-screen.hidden {
+        display: none;
+      }
+      .group-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: flex-end;
+      }
+      .entry-actions {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+        margin-top: 7px;
+      }
+      .entry-button {
+        border: 0;
+        border-radius: 6px;
+        padding: 4px 7px;
+        background: #edf5f1;
+        color: #176b5b;
+        font:
+          600 11px "DM Sans",
+          sans-serif;
+        cursor: pointer;
+      }
+      .entry-button.danger {
+        background: #fff0ed;
+        color: #b74634;
+      }
+      .member-friend-button {
+        margin-top: 7px;
+      }
+      .member-friend-status {
+        display: block;
+        margin-top: 7px;
+        color: #176b5b;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .invite-status {
+        border-radius: 999px;
+        padding: 5px 8px;
+        font-size: 10px;
+        font-weight: 700;
+      }
+      .invite-status.pending {
+        background: #fff3c9;
+        color: #815f12;
+      }
+      .invite-status.completed {
+        background: #dff3e9;
+        color: #176b5b;
+      }
+      textarea {
+        width: 100%;
+        resize: vertical;
+        border: 1px solid #cbdcd5;
+        border-radius: 8px;
+        padding: 11px;
+        color: #183631;
+        font:
+          14px "DM Sans",
+          sans-serif;
+      }
+      .form-hint {
+        color: #849990;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .check-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 400;
+      }
+      .check-option input {
+        width: auto;
+        padding: 0;
+        accent-color: #176b5b;
+      }
+      .submit:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+      .form-status {
+        min-height: 1.3em;
+        margin: 0;
+        color: #176b5b;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .form-status.error {
+        color: #b74634;
+      }
+      .local-reset-link {
+        color: #176b5b;
+        font-size: 12px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+      #toast {
+        z-index: 20;
+      }
+      .profile-actions {
+        display: flex;
+        gap: 4px;
+        margin-left: auto;
+      }
+      .profile .profile-actions button {
+        margin-left: 0;
+        border-radius: 6px;
+        padding: 6px;
+      }
+      @media (max-width: 580px) {
+        .group-actions {
+          justify-content: flex-start;
+          margin-top: 12px;
+        }
+      }
+    </style>
   </head>
   <body>
     <div class="shell">
       <aside class="sidebar">
-        <a class="brand" href="#" aria-label="Splito home"><span class="brand-mark">S</span><span>splito</span></a>
+        <a class="brand" href="#" aria-label="Splito home"
+          ><span class="brand-mark">S</span
+          ><span>splito</span></a
+        >
         <nav class="nav" aria-label="Main navigation">
-          <button class="nav-link active" data-view="dashboard"><span>◈</span>Overview</button>
-          <button class="nav-link" data-view="activity"><span>↗</span>Activity</button>
-          <button class="nav-link" data-view="friends"><span>♙</span>Friends</button>
+          <button
+            class="nav-link active"
+            type="button"
+            data-view="dashboard"
+          >
+            <span>&#x25C8;</span>Overview
+          </button>
+          <button
+            class="nav-link"
+            type="button"
+            data-view="activity"
+          >
+            <span>&#x2197;</span>Activity
+          </button>
+          <button
+            class="nav-link"
+            type="button"
+            data-view="friends"
+          >
+            <span>&#x2665;</span>Friends
+          </button>
         </nav>
         <div class="sidebar-label">YOUR GROUPS</div>
         <div id="groupNav" class="group-nav"></div>
-        <button class="new-group" id="newGroupBtn">＋ New group</button>
-        <div class="profile"><div class="avatar orange" id="profileAvatar">AK</div><div><strong id="profileName">Account</strong><small>Personal account</small></div><button id="logoutBtn" aria-label="Sign out">↪</button></div>
+        <button
+          class="new-group"
+          id="newGroupBtn"
+          type="button"
+        >
+          &#x2B; New group
+        </button>
+        <div class="profile">
+          <div class="avatar orange" id="profileAvatar">
+            AC
+          </div>
+          <div>
+            <strong id="profileName">Account</strong
+            ><small>Personal account</small>
+          </div>
+          <div class="profile-actions">
+            <button
+              id="accountSettingsBtn"
+              type="button"
+              aria-label="Account settings"
+              title="Account settings"
+            >
+              &#x2699;
+            </button>
+            <button
+              id="logoutBtn"
+              type="button"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              &#x21AA;
+            </button>
+          </div>
+        </div>
       </aside>
 
       <main class="main">
         <header class="topbar">
-          <div><p class="eyebrow" id="pageKicker">GOOD MORNING, ALEX</p><h1 id="pageTitle">Your expenses</h1></div>
-          <div class="top-actions"><button class="icon-button" aria-label="Notifications">♧<i></i></button><button class="add-expense" id="addExpenseBtn">＋ Add expense</button></div>
+          <div>
+            <p class="eyebrow" id="pageKicker">WELCOME</p>
+            <h1 id="pageTitle">Your expenses</h1>
+          </div>
+          <div class="top-actions">
+            <button
+              class="add-expense"
+              id="addExpenseBtn"
+              type="button"
+            >
+              &#x2B; Add expense
+            </button>
+          </div>
         </header>
 
         <section id="dashboardView" class="view">
           <div class="hero-grid">
             <article class="balance-card">
-              <div class="card-heading"><span>YOUR BALANCE</span><button class="plain-btn" id="settleBtn">Settle up</button></div>
-              <div class="balance-amount" id="netBalance">$0.00</div>
-              <p id="balanceMessage">All settled up. Nice!</p>
-              <div class="balance-bar"><span class="owed"></span><span class="owing"></span></div>
-              <div class="balance-meta"><span><i class="dot teal"></i>You are owed <b id="owedTotal">$0.00</b></span><span><i class="dot coral"></i>You owe <b id="owingTotal">$0.00</b></span></div>
+              <div class="card-heading">
+                <span>YOUR BALANCE</span
+                ><button
+                  class="plain-btn"
+                  id="settleBtn"
+                  type="button"
+                >
+                  Settle up
+                </button>
+              </div>
+              <div class="balance-amount" id="netBalance">
+                &#8377;0.00
+              </div>
+              <p id="balanceMessage">
+                All settled up. Nice!
+              </p>
+              <div class="balance-bar">
+                <span class="owed"></span
+                ><span class="owing"></span>
+              </div>
+              <div class="balance-meta">
+                <span
+                  ><i class="dot teal"></i>You are owed
+                  <b id="owedTotal">&#8377;0.00</b></span
+                ><span
+                  ><i class="dot coral"></i>You owe
+                  <b id="owingTotal">&#8377;0.00</b></span
+                >
+              </div>
             </article>
-            <article class="tip-card"><div class="tip-icon">✦</div><div><span class="pill">SMART TIP</span><h3>Keep the good times going.</h3><p>Add every shared cost as it happens — future you will be grateful.</p></div></article>
+            <article class="tip-card">
+              <div class="tip-icon">&#x2726;</div>
+              <div>
+                <span class="pill">SMART TIP</span>
+                <h3>Keep the good times going.</h3>
+                <p>
+                  Add every shared cost as it happens -
+                  future you will be grateful.
+                </p>
+              </div>
+            </article>
           </div>
 
-          <div class="section-header"><div><h2>Groups</h2><p>Where the memories (and receipts) live.</p></div><button class="text-button" id="seeGroups">See all groups <span>→</span></button></div>
+          <div class="section-header">
+            <div>
+              <h2>Groups</h2>
+              <p>Where the memories (and receipts) live.</p>
+            </div>
+            <button
+              class="text-button"
+              id="seeGroups"
+              type="button"
+            >
+              See all groups <span>&#x2192;</span>
+            </button>
+          </div>
           <div class="groups-grid" id="groupsGrid"></div>
 
           <div class="two-col">
-            <section class="activity-panel"><div class="section-header compact"><div><h2>Recent activity</h2><p>The latest across all your groups.</p></div><button class="text-button" data-view="activity">View all <span>→</span></button></div><div id="recentActivity" class="activity-list"></div></section>
-            <section class="friends-panel"><div class="section-header compact"><div><h2>Your friends</h2><p>People you split with most.</p></div><button class="text-button" data-view="friends">Manage <span>→</span></button></div><div id="friendList" class="friend-list"></div><button class="invite-btn" id="inviteBtn">＋ Invite a friend</button></section>
+            <section class="activity-panel">
+              <div class="section-header compact">
+                <div>
+                  <h2>Recent activity</h2>
+                  <p>The latest across all your groups.</p>
+                </div>
+                <button
+                  class="text-button"
+                  type="button"
+                  data-view="activity"
+                >
+                  View all <span>&#x2192;</span>
+                </button>
+              </div>
+              <div
+                id="recentActivity"
+                class="activity-list"
+              ></div>
+            </section>
+            <section class="friends-panel">
+              <div class="section-header compact">
+                <div>
+                  <h2>Your friends</h2>
+                  <p>People saved in your Friends list.</p>
+                </div>
+                <button
+                  class="text-button"
+                  type="button"
+                  data-view="friends"
+                >
+                  Manage <span>&#x2192;</span>
+                </button>
+              </div>
+              <div
+                id="friendList"
+                class="friend-list"
+              ></div>
+              <button
+                class="invite-btn"
+                id="addFriendFromDashboardBtn"
+                type="button"
+              >
+                &#x2B; Add a friend
+              </button>
+            </section>
           </div>
         </section>
 
-        <section id="activityView" class="view hidden"><div class="content-card"><div class="section-header"><div><h2>All activity</h2><p>Every expense and settlement, in one place.</p></div></div><div id="allActivity" class="activity-list full"></div></div></section>
-        <section id="friendsView" class="view hidden"><div class="content-card"><div class="section-header"><div><h2>Friends</h2><p>Track balances with the people in your circle.</p></div><button class="add-expense" id="addFriendBtn">＋ Add friend</button></div><div id="allFriends" class="friend-list large"></div></div></section>
-        <section id="groupView" class="view hidden"><div class="content-card"><button class="text-button" id="backToDashboard">← Back to overview</button><div class="section-header" style="margin-top:18px"><div><p class="eyebrow" id="detailKicker">GROUP</p><h2 id="detailTitle">Group</h2><p id="detailMembers"></p></div><div><button class="text-button" id="inviteMemberBtn">Invite member</button> <button class="add-expense" id="detailExpenseBtn">＋ Add expense</button></div></div><div id="detailBalances" class="friend-list large"></div><h2 style="margin-top:30px">Expenses</h2><div id="detailExpenses" class="activity-list full"></div><h2 style="margin-top:30px">Settlements</h2><div id="detailSettlements" class="activity-list full"></div></div></section>
+        <section id="activityView" class="view hidden">
+          <div class="content-card">
+            <div class="section-header">
+              <div>
+                <h2>All activity</h2>
+                <p>
+                  Every expense and settlement, in one
+                  place.
+                </p>
+              </div>
+            </div>
+            <div
+              id="allActivity"
+              class="activity-list full"
+            ></div>
+          </div>
+        </section>
+        <section id="friendsView" class="view hidden">
+          <div class="content-card">
+            <div class="section-header">
+              <div>
+                <h2>Friends</h2>
+                <p>
+                  Manage people you can add to your groups.
+                </p>
+              </div>
+              <button
+                class="add-expense"
+                id="addFriendBtn"
+                type="button"
+              >
+                &#x2B; Add friend
+              </button>
+            </div>
+            <div
+              id="allFriends"
+              class="friend-list large"
+            ></div>
+          </div>
+        </section>
+        <section id="groupView" class="view hidden">
+          <div class="content-card">
+            <button
+              class="text-button"
+              id="backToDashboard"
+              type="button"
+            >
+              &#x2190; Back to overview
+            </button>
+            <div
+              class="section-header"
+              style="margin-top: 18px"
+            >
+              <div>
+                <p class="eyebrow">GROUP</p>
+                <h2 id="detailTitle">Group</h2>
+                <p id="detailMembers"></p>
+              </div>
+              <div class="group-actions">
+                <button
+                  class="text-button"
+                  id="editGroupBtn"
+                  type="button"
+                >
+                  Edit group</button
+                ><button
+                  class="text-button"
+                  id="addMemberBtn"
+                  type="button"
+                >
+                  Add friend</button
+                ><button
+                  class="text-button"
+                  id="inviteMemberBtn"
+                  type="button"
+                >
+                  Invite member</button
+                ><button
+                  class="add-expense"
+                  id="detailExpenseBtn"
+                  type="button"
+                >
+                  &#x2B; Add expense
+                </button>
+              </div>
+            </div>
+            <div
+              id="detailBalances"
+              class="friend-list large"
+            ></div>
+            <h2 style="margin-top: 30px">
+              Invitation status
+            </h2>
+            <div
+              id="detailInvites"
+              class="activity-list full"
+            ></div>
+            <h2 style="margin-top: 30px">Expenses</h2>
+            <div
+              id="detailExpenses"
+              class="activity-list full"
+            ></div>
+            <h2 style="margin-top: 30px">Settlements</h2>
+            <div
+              id="detailSettlements"
+              class="activity-list full"
+            ></div>
+          </div>
+        </section>
       </main>
     </div>
 
-    <dialog id="expenseDialog"><form method="dialog" id="expenseForm" class="modal" novalidate><div class="modal-top"><div><p class="eyebrow">NEW EXPENSE</p><h2>Add an expense</h2></div><button class="close" type="button" formnovalidate aria-label="Close" onclick="event.preventDefault();this.closest('dialog').close()">×</button></div><label>Description<input name="description" required placeholder="e.g. Dinner at Momo's" /></label><div class="form-row"><label>Amount<input name="amount" required type="number" min="0.01" step="0.01" placeholder="0.00" /></label><label>Group<select name="group" id="expenseGroup"></select></label></div><label>Paid by<select name="payer" id="expensePayer"></select></label><label>Split equally with<select name="participants" id="expenseParticipants" multiple size="4"></select><small>Hold Ctrl / ⌘ to choose people. Leave empty to split with the whole group.</small></label><button class="submit" value="default">Add expense</button></form></dialog>
+    <dialog id="expenseDialog">
+      <form id="expenseForm" class="modal" novalidate>
+        <input name="entryId" type="hidden" />
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow" id="expenseDialogEyebrow">
+              NEW EXPENSE
+            </p>
+            <h2 id="expenseDialogTitle">Add an expense</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <label
+          >Description<input
+            name="description"
+            required
+            placeholder="e.g. Dinner at Momo's"
+        /></label>
+        <div class="form-row">
+          <label
+            >Amount<input
+              name="amount"
+              required
+              type="number"
+              min="0.01"
+              step="0.01"
+              placeholder="0.00" /></label
+          ><label
+            >Group<select
+              name="group"
+              id="expenseGroup"
+            ></select
+          ></label>
+        </div>
+        <div class="form-row">
+          <label
+            >Date<input
+              name="date"
+              required
+              type="date" /></label
+          ><label
+            >Category<select name="category">
+              <option value="other">Other</option>
+              <option value="food">Food &amp; drink</option>
+              <option value="groceries">Groceries</option>
+              <option value="transport">Transport</option>
+              <option value="travel">Travel</option>
+              <option value="home">Home</option>
+            </select></label
+          >
+        </div>
+        <label
+          >Paid by<select
+            name="payer"
+            id="expensePayer"
+          ></select></label
+        ><label
+          >Split equally with<select
+            name="participants"
+            id="expenseParticipants"
+            multiple
+            size="4"
+          ></select
+          ><small
+            >Hold Ctrl or Command to select people. All
+            members are selected by default.</small
+          ></label
+        ><label
+          >Notes (optional)<textarea
+            name="notes"
+            rows="3"
+            placeholder="Add a note"
+          ></textarea></label
+        ><button
+          class="submit"
+          id="expenseSubmit"
+          type="submit"
+        >
+          Add expense
+        </button>
+      </form>
+    </dialog>
 
-    <dialog id="groupDialog"><form method="dialog" id="groupForm" class="modal" novalidate><div class="modal-top"><div><p class="eyebrow">NEW GROUP</p><h2>Create a group</h2></div><button class="close" type="button" formnovalidate onclick="event.preventDefault();this.closest('dialog').close()">×</button></div><label>Group name<input name="name" required placeholder="e.g. Beach weekend" /></label><label>Emoji icon<input name="emoji" maxlength="2" placeholder="🏖️" /></label><label>Add members (comma separated)<input name="members" placeholder="Priya, Jamie, Sam" /></label><button class="submit" value="default">Create group</button></form></dialog>
+    <dialog id="groupDialog">
+      <form id="groupForm" class="modal" novalidate>
+        <input name="groupId" type="hidden" />
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow" id="groupDialogEyebrow">
+              NEW GROUP
+            </p>
+            <h2 id="groupDialogTitle">Create a group</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <label
+          >Group name<input
+            name="name"
+            required
+            placeholder="e.g. Beach weekend" /></label
+        ><label
+          >Emoji icon<input
+            name="emoji"
+            maxlength="4"
+            placeholder="&#x1F3D6;" /></label
+        ><small class="form-hint"
+          >Create the group first, then use Invite member to
+          share a private link by email.</small
+        ><button
+          class="submit"
+          id="groupSubmit"
+          type="submit"
+        >
+          Create group
+        </button>
+      </form>
+    </dialog>
 
-    <dialog id="settleDialog"><form method="dialog" id="settleForm" class="modal" novalidate><div class="modal-top"><div><p class="eyebrow">SETTLE A BALANCE</p><h2>Record a payment</h2></div><button class="close" type="button" formnovalidate onclick="event.preventDefault();this.closest('dialog').close()">×</button></div><label>Pay to<select name="payee" id="settlePayee"></select></label><label>Amount<input name="amount" required type="number" min="0.01" step="0.01" placeholder="0.00" /></label><button class="submit" value="default">Record payment</button></form></dialog>
-    <dialog id="inviteDialog"><form method="dialog" id="inviteForm" class="modal" novalidate><div class="modal-top"><div><p class="eyebrow">INVITE A MEMBER</p><h2>Share this group</h2></div><a class="close" href="#" role="button" aria-label="Close invite popup" onclick="this.closest('dialog').close();return false">×</a></div><label>Email address<input name="email" type="email" placeholder="friend@example.com" /></label><button class="submit" value="default">Create invite link</button></form></dialog>
-    <div id="authScreen" class="auth-screen"><div class="auth-card"><a class="brand dark" href="#"><span class="brand-mark">S</span><span>splito</span></a><p class="eyebrow">SHARE COSTS, NOT STRESS</p><h1>Split life together.</h1><p class="auth-copy">Create a shared account space for your roommates, trips, and every last dinner bill.</p><form id="authForm" class="auth-form"><label>Your name<input name="name" autocomplete="name" placeholder="Alex Kim" /></label><label>Email<input name="email" required type="email" autocomplete="email" placeholder="you@example.com" /></label><label>Password<input name="password" required minlength="6" type="password" autocomplete="current-password" placeholder="At least 6 characters" /></label><button class="submit" id="authSubmit">Create account</button></form><button class="text-button" id="authToggle">Already have an account? Sign in</button><p id="authError" class="auth-error"></p></div></div>
+    <dialog id="settleDialog">
+      <form id="settleForm" class="modal" novalidate>
+        <input name="entryId" type="hidden" />
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow" id="settleDialogEyebrow">
+              SETTLE A BALANCE
+            </p>
+            <h2 id="settleDialogTitle">Record a payment</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <label
+          >Group<select
+            name="group"
+            id="settleGroup"
+          ></select></label
+        ><label
+          >Paid by<select
+            name="payer"
+            id="settlePayer"
+          ></select></label
+        ><label
+          >Pay to<select
+            name="payee"
+            id="settlePayee"
+          ></select
+        ></label>
+        <div class="form-row">
+          <label
+            >Amount<input
+              name="amount"
+              required
+              type="number"
+              min="0.01"
+              step="0.01"
+              placeholder="0.00" /></label
+          ><label
+            >Date<input
+              name="settledAt"
+              required
+              type="date"
+          /></label>
+        </div>
+        <button
+          class="submit"
+          id="settleSubmit"
+          type="submit"
+        >
+          Record payment
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="inviteDialog">
+      <form id="inviteForm" class="modal" novalidate>
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">INVITE A MEMBER</p>
+            <h2>Share this group</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <label
+          >Email address<input
+            name="email"
+            required
+            type="email"
+            placeholder="friend@example.com" /></label
+        ><label class="form-hint check-option"
+          ><input name="addToFriends" type="checkbox" />
+          Also add this person to my Friends list when they
+          accept.</label
+        ><button class="submit" type="submit">
+          Create invite link
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="addMemberDialog">
+      <form id="addMemberForm" class="modal" novalidate>
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">ADD A FRIEND</p>
+            <h2>Add friends to this group</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <p class="form-hint">
+          Select one or more people from your Friends list.
+        </p>
+        <label
+          >Friends<select
+            id="addMemberPicker"
+            name="friendIds"
+            multiple
+            required
+            size="5"
+          ></select
+          ><small
+            >Hold Ctrl or Command to select more than one
+            friend.</small
+          >
+          ></label
+        >
+        <p id="addMemberEmpty" class="form-hint" hidden>
+          All of your friends are already in this group, or
+          your Friends list is empty. Add a friend to your
+          account first.
+        </p>
+        <button
+          class="submit"
+          id="addMemberSubmit"
+          type="submit"
+        >
+          Add selected friends
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="friendDialog">
+      <form id="friendForm" class="modal" novalidate>
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">ADD A FRIEND</p>
+            <h2>Your Friends list</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <p class="form-hint">
+          Add a person with an existing Splito account. Once
+          added, they can be selected when you add members
+          to any group.
+        </p>
+        <label
+          >Friend's account email<input
+            name="email"
+            required
+            type="email"
+            autocomplete="email"
+            placeholder="friend@example.com" /></label
+        ><button class="submit" type="submit">
+          Add friend
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="accountDialog">
+      <form id="accountForm" class="modal" novalidate>
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">ACCOUNT SETTINGS</p>
+            <h2>Your account</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <label
+          >Display name<input
+            name="name"
+            required
+            autocomplete="name" /></label
+        ><label
+          >Email address<input
+            name="email"
+            required
+            type="email"
+            autocomplete="email"
+        /></label>
+        <p class="form-hint">
+          Your current password is required only when
+          changing your email address or password.
+        </p>
+        <label
+          >Current password<input
+            name="currentPassword"
+            type="password"
+            autocomplete="current-password" /></label
+        ><label
+          >New password (optional)<input
+            name="newPassword"
+            minlength="6"
+            type="password"
+            autocomplete="new-password"
+            placeholder="At least 6 characters" /></label
+        ><label
+          >Confirm new password<input
+            name="confirmPassword"
+            minlength="6"
+            type="password"
+            autocomplete="new-password" /></label
+        ><button class="submit" type="submit">
+          Save account settings
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="forgotPasswordDialog">
+      <form
+        id="forgotPasswordForm"
+        class="modal"
+        novalidate
+      >
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">RESET PASSWORD</p>
+            <h2>Forgot your password?</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <p class="form-hint">
+          Enter your email address and we will send a
+          password-reset link if an account exists.
+        </p>
+        <label
+          >Email address<input
+            name="email"
+            required
+            type="email"
+            autocomplete="email"
+            placeholder="you@example.com"
+        /></label>
+        <p
+          id="forgotPasswordStatus"
+          class="form-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <a
+          id="localResetLink"
+          class="local-reset-link"
+          hidden
+        ></a
+        ><button class="submit" type="submit">
+          Send reset link
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="resetPasswordDialog">
+      <form id="resetPasswordForm" class="modal" novalidate>
+        <input name="token" type="hidden" />
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">CHOOSE A PASSWORD</p>
+            <h2>Reset password</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <label
+          >New password<input
+            name="newPassword"
+            required
+            minlength="6"
+            type="password"
+            autocomplete="new-password"
+            placeholder="At least 6 characters" /></label
+        ><label
+          >Confirm new password<input
+            name="confirmPassword"
+            required
+            minlength="6"
+            type="password"
+            autocomplete="new-password"
+        /></label>
+        <p
+          id="resetPasswordStatus"
+          class="form-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <button class="submit" type="submit">
+          Reset password
+        </button>
+      </form>
+    </dialog>
+
+    <div id="authScreen" class="auth-screen">
+      <div class="auth-card">
+        <a class="brand dark" href="#"
+          ><span class="brand-mark">S</span
+          ><span>splito</span></a
+        >
+        <p class="eyebrow">SHARE COSTS, NOT STRESS</p>
+        <h1>Split life together.</h1>
+        <p class="auth-copy">
+          Create a shared account space for your roommates,
+          trips, and every last dinner bill.
+        </p>
+        <form id="authForm" class="auth-form">
+          <label
+            >Your name<input
+              name="name"
+              autocomplete="name"
+              placeholder="Alex Kim" /></label
+          ><label
+            >Email<input
+              name="email"
+              required
+              type="email"
+              autocomplete="email"
+              placeholder="you@example.com" /></label
+          ><label
+            >Password<input
+              name="password"
+              required
+              minlength="6"
+              type="password"
+              autocomplete="current-password"
+              placeholder="At least 6 characters" /></label
+          ><button
+            class="submit"
+            id="authSubmit"
+            type="submit"
+          >
+            Create account
+          </button>
+        </form>
+        <button
+          class="text-button"
+          id="forgotPasswordBtn"
+          type="button"
+        >
+          Forgot password?
+        </button>
+        <button
+          class="text-button"
+          id="authToggle"
+          type="button"
+        >
+          Already have an account? Sign in
+        </button>
+        <p id="authError" class="auth-error"></p>
+      </div>
+    </div>
     <div id="toast" role="status"></div>
-    <!-- api-config.js selects the local Worker on localhost and the production API elsewhere. -->
-    <script src="api-config.js"></script>
-    <script src="app.js"></script>
+    <script src="api-config.js?v=20260918-invite-email-status"></script>
+    <script src="app.js?v=20260918-invite-email-status"></script>
   </body>
 </html>
