@@ -4,7 +4,8 @@
   "main": "worker.js",
   "compatibility_date": "2026-09-17",
   "vars": {
-    "FRONTEND_URL": "https://vikasbarai.github.io/splito/"
+    "FRONTEND_URL": "https://vikasbarai.github.io/splito/",
+    "RESEND_FROM": "Splito <no-reply@squarelab.in>"
   },
   "d1_databases": [
     {
@@ -14,3 +15,4 @@
     }
   ]
 }
+

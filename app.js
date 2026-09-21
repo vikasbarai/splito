@@ -114,6 +114,16 @@ function showOutdatedPageMessage() {
 function updateAccountUI() {
   $("#profileName").textContent = me.name;
   $("#profileAvatar").textContent = initials(me.name);
+  $("#mobileProfileName").textContent = me.name;
+  $("#mobileProfileAvatar").textContent = initials(me.name);
+  $("#mobileAccountSettingsBtn").setAttribute(
+    "aria-label",
+    `Open account settings for ${me.name}`,
+  );
+  $("#mobileAccountNavBtn").setAttribute(
+    "aria-label",
+    `Open account settings for ${me.name}`,
+  );
   $("#pageKicker").textContent =
     `WELCOME, ${me.name.toUpperCase()}`;
 }
@@ -228,7 +238,7 @@ function view(name) {
           ? "Friends"
           : activeGroup?.group.name || "Group";
   document
-    .querySelectorAll(".nav-link")
+    .querySelectorAll(".nav-link, .mobile-nav [data-view]")
     .forEach((element) => {
       element.classList.toggle(
         "active",
@@ -551,6 +561,29 @@ function openFriendDialog() {
   openDialog($("#friendDialog"));
 }
 
+function openAccountSettings() {
+  const form = $("#accountForm");
+  form.reset();
+  form.elements.name.value = me.name;
+  form.elements.email.value = me.email;
+  openDialog($("#accountDialog"));
+}
+
+function signOut() {
+  localStorage.removeItem("splito-token");
+  location.reload();
+}
+
+function showGroups() {
+  view("dashboard");
+  requestAnimationFrame(() =>
+    $("#groupsGrid").scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    }),
+  );
+}
+
 function openForgotPassword() {
   const form = $("#forgotPasswordForm");
   const authForm = $("#authForm");
@@ -615,6 +648,7 @@ $("#authForm").onsubmit = async (event) => {
     token = result.token;
     me = result.user;
     localStorage.setItem("splito-token", token);
+    document.body.classList.add("is-authenticated");
     $("#authScreen").classList.add("hidden");
     updateAccountUI();
     await load();
@@ -706,13 +740,14 @@ if (resetPasswordForm) {
 }
 
 $("#newGroupBtn").onclick = () => openGroupDialog();
-$("#accountSettingsBtn").onclick = () => {
-  const form = $("#accountForm");
-  form.reset();
-  form.elements.name.value = me.name;
-  form.elements.email.value = me.email;
-  openDialog($("#accountDialog"));
-};
+$("#mobileNewGroupBtn").onclick = () => openGroupDialog();
+$("#accountSettingsBtn").onclick = openAccountSettings;
+$("#mobileAccountSettingsBtn").onclick =
+  openAccountSettings;
+$("#mobileAccountNavBtn").onclick = openAccountSettings;
+$("#accountDialogLogoutBtn").onclick = signOut;
+$("#compactGroupsBtn").onclick = showGroups;
+$("#mobileGroupsBtn").onclick = showGroups;
 $("#editGroupBtn").onclick = () =>
   activeGroup && openGroupDialog(activeGroup.group);
 $("#addExpenseBtn").onclick = () =>
@@ -938,16 +973,9 @@ async function deleteEntry(type, entryId, label) {
   }
 }
 
-$("#logoutBtn").onclick = () => {
-  localStorage.removeItem("splito-token");
-  location.reload();
-};
+$("#logoutBtn").onclick = signOut;
 $("#backToDashboard").onclick = () => view("dashboard");
-$("#seeGroups").onclick = () =>
-  $("#groupsGrid").scrollIntoView({
-    behavior: "smooth",
-    block: "start",
-  });
+$("#seeGroups").onclick = showGroups;
 
 document.addEventListener("click", (event) => {
   const addFriend = event.target.closest(
@@ -1080,6 +1108,7 @@ document.addEventListener("keydown", (event) => {
   try {
     me = (await api("/me")).user;
     updateAccountUI();
+    document.body.classList.add("is-authenticated");
     $("#authScreen").classList.add("hidden");
     await load();
     await acceptInvite();
