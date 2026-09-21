@@ -74,6 +74,48 @@
       .auth-screen.hidden {
         display: none;
       }
+      .auth-loading {
+        position: fixed;
+        z-index: 20;
+        inset: 0;
+        display: none;
+        place-items: center;
+        padding: 22px;
+        color: #fffdf9;
+        background: linear-gradient(
+          125deg,
+          #113d35,
+          #2e806d
+        );
+      }
+      .auth-loading-copy {
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        font-weight: 700;
+      }
+      .auth-loading .brand-mark {
+        width: 54px;
+        height: 54px;
+        font-size: 25px;
+        color: #113d35;
+        background: #fffdf9;
+      }
+      body.auth-pending .auth-loading {
+        display: grid;
+      }
+      body.auth-pending .auth-screen {
+        display: none;
+      }
+      body.auth-pending .shell,
+      body.auth-pending .mobile-nav,
+      body.auth-pending #toast {
+        visibility: hidden;
+      }
+      dialog {
+        max-height: calc(100dvh - 30px);
+        overflow-y: auto;
+      }
       .group-actions {
         display: flex;
         flex-wrap: wrap;
@@ -81,11 +123,37 @@
         align-items: center;
         justify-content: flex-end;
       }
+      .danger-text-button {
+        color: #b74634;
+      }
       .entry-actions {
         display: flex;
         gap: 6px;
         justify-content: flex-end;
         margin-top: 7px;
+      }
+      .expense-split-details {
+        display: grid;
+        gap: 5px;
+        margin-top: 8px;
+      }
+      .split-method-badge {
+        width: fit-content;
+        border-radius: 999px;
+        padding: 3px 7px;
+        background: #e9f4ef;
+        color: #176b5b;
+        font-size: 10px;
+        font-weight: 700;
+      }
+      .split-breakdown {
+        color: #43645a;
+        font-size: 11px;
+        line-height: 1.55;
+      }
+      .split-separator {
+        padding: 0 6px;
+        color: #9ab0a7;
       }
       .entry-button {
         border: 0;
@@ -126,6 +194,101 @@
         background: #dff3e9;
         color: #176b5b;
       }
+      .invite-actions {
+        display: grid;
+        justify-items: end;
+        gap: 6px;
+      }
+      .friend-balance small {
+        display: block;
+        color: #788d86;
+        font-size: 10px;
+      }
+      .friend-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        margin-top: 7px;
+      }
+      .friend-actions .member-friend-button,
+      .friend-actions .settle-friend-button {
+        margin-top: 0;
+      }
+      .overview-people {
+        display: grid;
+        align-content: start;
+        gap: 20px;
+      }
+      .entry-receipt {
+        display: inline-block;
+        width: fit-content;
+        margin-top: 6px;
+        color: #176b5b;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .activity-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 14px;
+        color: #71877f;
+        font-size: 11px;
+      }
+      .activity-pagination-actions {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+      }
+      .activity-pagination .entry-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+      .tip-author,
+      .tip-attribution {
+        color: #765f32;
+        font-size: 11px;
+      }
+      .tip-author {
+        margin: 8px 0 0;
+        font-weight: 700;
+      }
+      .tip-attribution {
+        margin: 8px 0 0;
+      }
+      .tip-attribution a {
+        color: inherit;
+      }
+      .group-owner {
+        margin: 2px 0 4px;
+        color: #176b5b;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .receipt-upload {
+        display: grid;
+        gap: 6px;
+      }
+      .receipt-preview {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        border: 1px solid #dce8e3;
+        border-radius: 8px;
+        background: #f7fbf8;
+      }
+      .receipt-preview[hidden] {
+        display: none;
+      }
+      .receipt-preview img {
+        width: 54px;
+        height: 54px;
+        border-radius: 6px;
+        object-fit: cover;
+      }
       textarea {
         width: 100%;
         resize: vertical;
@@ -141,6 +304,289 @@
         color: #849990;
         font-size: 12px;
         line-height: 1.4;
+      }
+      .emoji-control {
+        position: relative;
+      }
+      .emoji-picker {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 8px;
+        max-height: 236px;
+        overflow-y: auto;
+        padding: 8px;
+        border: 1px solid #cbdcd5;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 8px 18px #163e3418;
+      }
+      .emoji-picker[hidden] {
+        display: none;
+      }
+      .emoji-picker button {
+        min-width: 0;
+        min-height: 36px;
+        width: 100%;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: #f4f8f6;
+        cursor: pointer;
+        font-size: 20px;
+      }
+      .emoji-picker button:hover,
+      .emoji-picker button:focus-visible {
+        border-color: #91b9ad;
+        background: #dff3e9;
+        outline: none;
+      }
+      .emoji-picker-hint {
+        display: block;
+        margin-top: 6px;
+      }
+      .avatar.has-avatar-image {
+        background-position: center;
+        background-size: cover;
+        color: transparent;
+      }
+      .account-avatar-editor {
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+        padding: 13px;
+        border: 1px solid #dce8e3;
+        border-radius: 12px;
+        background: #f8fbf9;
+      }
+      .account-avatar-preview {
+        width: 64px;
+        height: 64px;
+        font-size: 19px;
+      }
+      .account-avatar-fields {
+        display: grid;
+        gap: 10px;
+      }
+      .account-avatar-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .account-avatar-actions .text-button {
+        padding: 0;
+      }
+      .avatar-color-control {
+        display: grid;
+        gap: 6px;
+      }
+      .avatar-color-label {
+        color: #43645a;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .avatar-color-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+      }
+      .avatar-custom-color {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .avatar-custom-color input[type="color"] {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid #b7ccc3;
+        border-radius: 50%;
+        appearance: none;
+        overflow: hidden;
+        cursor: pointer;
+      }
+      .avatar-custom-color
+        input[type="color"]::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+      .avatar-custom-color
+        input[type="color"]::-webkit-color-swatch,
+      .avatar-custom-color
+        input[type="color"]::-moz-color-swatch {
+        border: 0;
+        border-radius: 50%;
+      }
+      .avatar-color-option {
+        width: 25px;
+        height: 25px;
+        padding: 0;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        background: var(--avatar-color);
+        box-shadow: 0 0 0 1px #b7ccc3;
+        cursor: pointer;
+      }
+      .avatar-color-option[aria-pressed="true"] {
+        outline: 2px solid #176b5b;
+        outline-offset: 2px;
+      }
+      .avatar-color-option:focus-visible {
+        outline: 2px solid #176b5b;
+        outline-offset: 3px;
+      }
+      .split-editor {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid #dce8e3;
+        border-radius: 10px;
+        background: #f8fbf9;
+      }
+      .split-editor[hidden] {
+        display: none;
+      }
+      .split-editor-copy {
+        margin: 0;
+        color: #647c74;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .split-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(
+            100px,
+            0.7fr
+          );
+        gap: 10px;
+        align-items: center;
+      }
+      .split-row strong {
+        overflow: hidden;
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .split-row input {
+        padding: 8px 10px;
+        text-align: right;
+      }
+      .split-summary {
+        margin: 2px 0 0;
+        color: #176b5b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .split-summary.error {
+        color: #b74634;
+      }
+      #expenseDialog {
+        width: min(920px, calc(100vw - 32px));
+      }
+      #accountDialog {
+        width: min(920px, calc(100vw - 32px));
+      }
+      #expenseDialog .expense-description-row {
+        grid-template-columns: 170px minmax(0, 1fr);
+        align-items: start;
+      }
+      #expenseDialog .emoji-control {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+      #expenseDialog .emoji-picker {
+        position: absolute;
+        z-index: 30;
+        top: calc(100% + 4px);
+        left: 0;
+        grid-template-columns: repeat(
+          auto-fill,
+          minmax(34px, 1fr)
+        );
+        width: min(360px, calc(100vw - 64px));
+        max-height: 260px;
+        margin-top: 0;
+      }
+      @media (min-width: 641px) {
+        #expenseDialog .modal {
+          gap: 12px;
+        }
+        #accountDialog .modal {
+          gap: 12px;
+        }
+        #accountDialog .account-password-fields {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+        }
+        #accountDialog .account-avatar-fields {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          column-gap: 14px;
+          row-gap: 10px;
+        }
+        #accountDialog .emoji-picker {
+          position: absolute;
+          z-index: 30;
+          top: calc(100% + 4px);
+          left: 0;
+          width: min(360px, calc(100vw - 64px));
+          max-height: 260px;
+          margin-top: 0;
+        }
+        #expenseDialog .split-editor {
+          gap: 4px;
+          padding: 8px 10px;
+        }
+        #expenseDialog .split-editor-copy {
+          display: none;
+        }
+      }
+      @media (max-width: 640px) {
+        #expenseDialog {
+          width: calc(100vw - 20px);
+          max-height: calc(100dvh - 20px);
+          overflow-y: auto;
+        }
+        #accountDialog {
+          width: calc(100vw - 20px);
+          max-height: calc(100dvh - 20px);
+          overflow-y: auto;
+        }
+        #accountDialog .account-identity-row,
+        #accountDialog .account-password-fields {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+        #accountDialog .emoji-picker {
+          position: static;
+          width: 100%;
+          max-height: 200px;
+          margin-top: 8px;
+        }
+        #expenseDialog .expense-description-row {
+          grid-template-columns: 112px minmax(0, 1fr);
+        }
+        #expenseDialog .emoji-picker {
+          position: static;
+          grid-template-columns: repeat(
+            auto-fill,
+            minmax(34px, 1fr)
+          );
+          width: 100%;
+          max-height: 200px;
+          margin-top: 8px;
+        }
+      }
+      @media (max-width: 380px) {
+        .emoji-picker {
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+        }
+        .account-avatar-editor {
+          grid-template-columns: 1fr;
+        }
       }
       .check-option {
         display: flex;
@@ -426,7 +872,17 @@
       }
     </style>
   </head>
-  <body>
+  <body class="auth-pending">
+    <div
+      class="auth-loading"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="auth-loading-copy">
+        <span class="brand-mark">S</span>
+        <span>Loading your Splito account…</span>
+      </div>
+    </div>
     <div class="shell">
       <aside class="sidebar">
         <a class="brand" href="#" aria-label="Splito home"
@@ -573,10 +1029,24 @@
               <div class="tip-icon">&#x2726;</div>
               <div>
                 <span class="pill">SMART TIP</span>
-                <h3>Keep the good times going.</h3>
-                <p>
-                  Add every shared cost as it happens -
-                  future you will be grateful.
+                <h3 id="tipQuote">
+                  Keep the good times going.
+                </h3>
+                <p id="tipAuthor" class="tip-author">
+                  — Splito
+                </p>
+                <p
+                  id="tipAttribution"
+                  class="tip-attribution"
+                  hidden
+                >
+                  Quotes provided by
+                  <a
+                    href="https://zenquotes.io/"
+                    target="_blank"
+                    rel="noopener"
+                    >ZenQuotes</a
+                  >
                 </p>
               </div>
             </article>
@@ -623,33 +1093,57 @@
                 id="recentActivity"
                 class="activity-list"
               ></div>
+              <div id="recentActivityPagination"></div>
             </section>
-            <section class="friends-panel">
-              <div class="section-header compact">
-                <div>
-                  <h2>Your friends</h2>
-                  <p>People saved in your Friends list.</p>
+            <div class="overview-people">
+              <section class="friends-panel">
+                <div class="section-header compact">
+                  <div>
+                    <h2>Your friends</h2>
+                    <p>
+                      Direct balances across shared groups.
+                    </p>
+                  </div>
+                  <button
+                    class="text-button"
+                    type="button"
+                    data-view="friends"
+                  >
+                    Manage <span>&#x2192;</span>
+                  </button>
                 </div>
+                <div
+                  id="friendList"
+                  class="friend-list"
+                ></div>
                 <button
-                  class="text-button"
+                  class="invite-btn"
+                  id="addFriendFromDashboardBtn"
                   type="button"
-                  data-view="friends"
                 >
-                  Manage <span>&#x2192;</span>
+                  &#x2B; Add a friend
                 </button>
-              </div>
-              <div
-                id="friendList"
-                class="friend-list"
-              ></div>
-              <button
-                class="invite-btn"
-                id="addFriendFromDashboardBtn"
-                type="button"
+              </section>
+              <section
+                class="friends-panel"
+                id="unsettledNonFriendsPanel"
+                hidden
               >
-                &#x2B; Add a friend
-              </button>
-            </section>
+                <div class="section-header compact">
+                  <div>
+                    <h2>Unsettled non-friends</h2>
+                    <p>
+                      People with unpaid balances who are
+                      not in your Friends list.
+                    </p>
+                  </div>
+                </div>
+                <div
+                  id="unsettledNonFriendsList"
+                  class="friend-list"
+                ></div>
+              </section>
+            </div>
           </div>
         </section>
 
@@ -668,6 +1162,7 @@
               id="allActivity"
               class="activity-list full"
             ></div>
+            <div id="allActivityPagination"></div>
           </div>
         </section>
         <section id="friendsView" class="view hidden">
@@ -709,6 +1204,7 @@
               <div>
                 <p class="eyebrow">GROUP</p>
                 <h2 id="detailTitle">Group</h2>
+                <p id="detailOwner" class="group-owner"></p>
                 <p id="detailMembers"></p>
               </div>
               <div class="group-actions">
@@ -718,6 +1214,13 @@
                   type="button"
                 >
                   Edit group</button
+                ><button
+                  class="text-button danger-text-button"
+                  id="deleteGroupBtn"
+                  type="button"
+                  hidden
+                >
+                  Delete group</button
                 ><button
                   class="text-button"
                   id="addMemberBtn"
@@ -812,15 +1315,37 @@
             &times;
           </button>
         </div>
-        <label
-          >Description<input
-            name="description"
-            required
-            placeholder="e.g. Dinner at Momo's"
-        /></label>
+        <div class="form-row expense-description-row">
+          <div class="emoji-control">
+            <label for="expenseEmoji">Expense icon</label>
+            <input
+              id="expenseEmoji"
+              name="emoji"
+              readonly
+              placeholder="✨"
+            />
+            <div
+              class="emoji-picker"
+              id="expenseEmojiPicker"
+              role="group"
+              aria-label="Choose an icon for the expense"
+              hidden
+            ></div>
+          </div>
+          <label>
+            Description
+            <input
+              id="expenseDescription"
+              name="description"
+              required
+              placeholder="e.g. Dinner at Momo's"
+            />
+          </label>
+        </div>
         <div class="form-row">
           <label
             >Amount<input
+              id="expenseAmount"
               name="amount"
               required
               type="number"
@@ -851,29 +1376,87 @@
             </select></label
           >
         </div>
-        <label
-          >Paid by<select
-            name="payer"
-            id="expensePayer"
-          ></select></label
-        ><label
-          >Split equally with<select
+        <div class="form-row expense-payer-method-row">
+          <label>
+            Paid by
+            <select name="payer" id="expensePayer"></select>
+          </label>
+          <label>
+            Split method
+            <select name="splitMode" id="expenseSplitMode">
+              <option value="equal">Split equally</option>
+              <option value="exact">Exact amounts</option>
+              <option value="percentage">
+                Percentages
+              </option>
+              <option value="shares">Shares</option>
+              <option value="adjustment">
+                Adjustments
+              </option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Split with
+          <select
             name="participants"
             id="expenseParticipants"
             multiple
-            size="4"
-          ></select
-          ><small
-            >Hold Ctrl or Command to select people. All
-            members are selected by default.</small
-          ></label
-        ><label
-          >Notes (optional)<textarea
+            size="3"
+          ></select>
+          <small>
+            Hold Ctrl or Command to select people. All
+            members are selected by default.
+          </small>
+        </label>
+        <div
+          class="split-editor"
+          id="expenseSplitEditor"
+          aria-live="polite"
+        ></div>
+        <label>
+          Notes (optional)
+          <textarea
             name="notes"
-            rows="3"
+            rows="2"
             placeholder="Add a note"
-          ></textarea></label
-        ><button
+          ></textarea>
+        </label>
+        <div class="receipt-upload">
+          <label>
+            Receipt or proof (optional)
+            <input
+              id="expenseReceipt"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+            />
+          </label>
+          <small
+            id="expenseReceiptStatus"
+            class="form-hint"
+          >
+            JPG, PNG, or WebP. It is compressed to a JPEG
+            under 500 KB before saving.
+          </small>
+          <div
+            id="expenseReceiptPreview"
+            class="receipt-preview"
+            hidden
+          >
+            <img
+              id="expenseReceiptPreviewImage"
+              alt="Expense receipt preview"
+            />
+            <button
+              id="removeExpenseReceipt"
+              class="entry-button"
+              type="button"
+            >
+              Remove receipt
+            </button>
+          </div>
+        </div>
+        <button
           class="submit"
           id="expenseSubmit"
           type="submit"
@@ -906,13 +1489,118 @@
           >Group name<input
             name="name"
             required
-            placeholder="e.g. Beach weekend" /></label
-        ><label
-          >Emoji icon<input
+            placeholder="e.g. Beach weekend"
+        /></label>
+        <div class="emoji-control">
+          <label for="groupEmoji">Emoji icon</label>
+          <input
+            id="groupEmoji"
             name="emoji"
-            maxlength="4"
-            placeholder="&#x1F3D6;" /></label
-        ><small class="form-hint"
+            placeholder="&#x1F3D6;"
+            autocomplete="off"
+            aria-describedby="groupEmojiHint"
+          />
+          <div
+            class="emoji-picker"
+            id="groupEmojiPicker"
+            role="group"
+            aria-label="Choose a group icon"
+            hidden
+          >
+            <button
+              type="button"
+              data-group-emoji="&#x1F3D6;&#xFE0F;"
+              aria-label="Beach"
+            >
+              &#x1F3D6;&#xFE0F;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F3D5;"
+              aria-label="Camping"
+            >
+              &#x1F3D5;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F37D;&#xFE0F;"
+              aria-label="Food"
+            >
+              &#x1F37D;&#xFE0F;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F3AC;"
+              aria-label="Movies"
+            >
+              &#x1F3AC;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x2708;&#xFE0F;"
+              aria-label="Travel"
+            >
+              &#x2708;&#xFE0F;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F3E0;"
+              aria-label="Home"
+            >
+              &#x1F3E0;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F6D2;"
+              aria-label="Shopping"
+            >
+              &#x1F6D2;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F4B8;"
+              aria-label="Money"
+            >
+              &#x1F4B8;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F697;"
+              aria-label="Road trip"
+            >
+              &#x1F697;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F3AE;"
+              aria-label="Games"
+            >
+              &#x1F3AE;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F4DA;"
+              aria-label="Study"
+            >
+              &#x1F4DA;
+            </button>
+            <button
+              type="button"
+              data-group-emoji="&#x1F389;"
+              aria-label="Celebration"
+            >
+              &#x1F389;
+            </button>
+          </div>
+          <small
+            class="form-hint emoji-picker-hint"
+            id="groupEmojiHint"
+          >
+            Select an icon below, type or paste an emoji, or
+            press Win + . to open the Windows emoji panel.
+          </small>
+        </div>
+        <small class="form-hint"
           >Create the group first, then use Invite member to
           share a private link by email.</small
         ><button
@@ -960,6 +1648,7 @@
             id="settlePayee"
           ></select
         ></label>
+        <p id="settleContext" class="form-hint" hidden></p>
         <div class="form-row">
           <label
             >Amount<input
@@ -975,6 +1664,40 @@
               required
               type="date"
           /></label>
+        </div>
+        <div class="receipt-upload">
+          <label>
+            Receipt or payment proof (optional)
+            <input
+              id="settlementReceipt"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+            />
+          </label>
+          <small
+            id="settlementReceiptStatus"
+            class="form-hint"
+          >
+            JPG, PNG, or WebP. It is compressed to a JPEG
+            under 500 KB before saving.
+          </small>
+          <div
+            id="settlementReceiptPreview"
+            class="receipt-preview"
+            hidden
+          >
+            <img
+              id="settlementReceiptPreviewImage"
+              alt="Payment proof preview"
+            />
+            <button
+              id="removeSettlementReceipt"
+              class="entry-button"
+              type="button"
+            >
+              Remove receipt
+            </button>
+          </div>
         </div>
         <button
           class="submit"
@@ -1018,6 +1741,49 @@
       </form>
     </dialog>
 
+    <dialog id="inviteLinkDialog">
+      <div class="modal">
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">INVITATION READY</p>
+            <h2>Share invite link</h2>
+          </div>
+          <button
+            class="close"
+            type="button"
+            aria-label="Close"
+            onclick="this.closest('dialog').close()"
+          >
+            &times;
+          </button>
+        </div>
+        <p class="form-hint">
+          Email is not configured locally. Copy this private
+          link and send it to the person you invited.
+        </p>
+        <label for="generatedInviteLink"
+          >Invite link<input
+            id="generatedInviteLink"
+            type="text"
+            readonly
+        /></label>
+        <button
+          class="submit"
+          id="copyGeneratedInviteLinkBtn"
+          type="button"
+        >
+          Copy link
+        </button>
+        <button
+          class="text-button"
+          type="button"
+          onclick="this.closest('dialog').close()"
+        >
+          Done
+        </button>
+      </div>
+    </dialog>
+
     <dialog id="addMemberDialog">
       <form id="addMemberForm" class="modal" novalidate>
         <div class="modal-top">
@@ -1049,8 +1815,7 @@
             >Hold Ctrl or Command to select more than one
             friend.</small
           >
-          ></label
-        >
+        </label>
         <p id="addMemberEmpty" class="form-hint" hidden>
           All of your friends are already in this group, or
           your Friends list is empty. Add a friend to your
@@ -1116,41 +1881,193 @@
             &times;
           </button>
         </div>
-        <label
-          >Display name<input
-            name="name"
-            required
-            autocomplete="name" /></label
-        ><label
-          >Email address<input
-            name="email"
-            required
-            type="email"
-            autocomplete="email"
-        /></label>
+        <div class="form-row account-identity-row">
+          <label
+            >Display name<input
+              name="name"
+              required
+              autocomplete="name" /></label
+          ><label
+            >Email address<input
+              name="email"
+              required
+              type="email"
+              autocomplete="email"
+          /></label>
+        </div>
+        <div class="account-avatar-editor">
+          <div
+            class="avatar orange account-avatar-preview"
+            id="accountAvatarPreview"
+            aria-label="Profile picture preview"
+          >
+            AC
+          </div>
+          <div class="account-avatar-fields">
+            <div class="emoji-control">
+              <label for="accountAvatarEmoji"
+                >Profile emoji</label
+              >
+              <input
+                id="accountAvatarEmoji"
+                name="avatarEmoji"
+                readonly
+                placeholder="🙂"
+                aria-describedby="accountAvatarEmojiHint"
+              />
+              <div
+                class="emoji-picker"
+                id="accountAvatarEmojiPicker"
+                role="group"
+                aria-label="Choose a profile emoji"
+                hidden
+              ></div>
+              <small
+                class="form-hint emoji-picker-hint"
+                id="accountAvatarEmojiHint"
+              >
+                Choose an emoji, or upload a profile photo
+                below.
+              </small>
+            </div>
+            <input
+              name="avatarColor"
+              type="hidden"
+              value="#d76e47"
+            />
+            <div class="avatar-color-control">
+              <span class="avatar-color-label">
+                Avatar background
+              </span>
+              <div
+                class="avatar-color-options"
+                role="group"
+                aria-label="Choose an avatar background color"
+              >
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#d76e47"
+                  style="--avatar-color: #d76e47"
+                  aria-label="Coral orange"
+                  aria-pressed="true"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#8d76bd"
+                  style="--avatar-color: #8d76bd"
+                  aria-label="Purple"
+                  aria-pressed="false"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#5797b2"
+                  style="--avatar-color: #5797b2"
+                  aria-label="Blue"
+                  aria-pressed="false"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#c16e97"
+                  style="--avatar-color: #c16e97"
+                  aria-label="Pink"
+                  aria-pressed="false"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#52977d"
+                  style="--avatar-color: #52977d"
+                  aria-label="Green"
+                  aria-pressed="false"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#176b5b"
+                  style="--avatar-color: #176b5b"
+                  aria-label="Teal"
+                  aria-pressed="false"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#b8842b"
+                  style="--avatar-color: #b8842b"
+                  aria-label="Gold"
+                  aria-pressed="false"
+                ></button>
+                <button
+                  class="avatar-color-option"
+                  type="button"
+                  data-account-avatar-color="#596f9b"
+                  style="--avatar-color: #596f9b"
+                  aria-label="Slate blue"
+                  aria-pressed="false"
+                ></button>
+              </div>
+              <label class="avatar-custom-color">
+                <span>Pick your own color</span>
+                <input
+                  id="accountAvatarColorPicker"
+                  type="color"
+                  value="#d76e47"
+                  aria-label="Choose a custom avatar background color"
+                />
+              </label>
+            </div>
+            <label>
+              Profile photo
+              <input
+                id="accountAvatarImage"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+              />
+            </label>
+            <div class="account-avatar-actions">
+              <button
+                class="text-button"
+                id="removeAccountAvatarImageBtn"
+                type="button"
+              >
+                Remove photo
+              </button>
+              <small class="form-hint">
+                JPG, PNG, or WebP. It is resized before
+                saving.
+              </small>
+            </div>
+          </div>
+        </div>
         <p class="form-hint">
           Your current password is required only when
           changing your email address or password.
         </p>
-        <label
-          >Current password<input
-            name="currentPassword"
-            type="password"
-            autocomplete="current-password" /></label
-        ><label
-          >New password (optional)<input
-            name="newPassword"
-            minlength="6"
-            type="password"
-            autocomplete="new-password"
-            placeholder="At least 6 characters" /></label
-        ><label
-          >Confirm new password<input
-            name="confirmPassword"
-            minlength="6"
-            type="password"
-            autocomplete="new-password" /></label
-        ><button class="submit" type="submit">
+        <div class="account-password-fields">
+          <label
+            >Current password<input
+              name="currentPassword"
+              type="password"
+              autocomplete="current-password" /></label
+          ><label
+            >New password (optional)<input
+              name="newPassword"
+              minlength="6"
+              type="password"
+              autocomplete="new-password"
+              placeholder="At least 6 characters" /></label
+          ><label
+            >Confirm new password<input
+              name="confirmPassword"
+              minlength="6"
+              type="password"
+              autocomplete="new-password"
+          /></label>
+        </div>
+        <button class="submit" type="submit">
           Save account settings</button
         ><button
           class="text-button account-signout"
@@ -1316,6 +2233,6 @@
     </div>
     <div id="toast" role="status"></div>
     <script src="api-config.js?v=20260921-responsive-layout"></script>
-    <script src="app.js?v=20260921-responsive-layout"></script>
+    <script src="app.js?v=20260921-auth-session-loading"></script>
   </body>
 </html>

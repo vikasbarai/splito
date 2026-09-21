@@ -1,16 +1,29 @@
 const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [
+  ...document.querySelectorAll(selector),
+];
 
 let token = localStorage.getItem("splito-token");
 let me;
 let dash = { groups: [], activity: [], friends: [] };
 let activeGroup;
 let mode = "register";
+let expenseSplitValues = {};
+let accountAvatarImage = "";
+let expenseReceiptImage = "";
+let settlementReceiptImage = "";
+let activityPage = 1;
+let tipRequest = 0;
+const defaultAvatarColor = "#d76e47";
+const maxReceiptImageBytes = 500 * 1024;
 
 const money = (cents) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
   }).format(Math.abs(Number(cents) || 0) / 100);
+const signedMoney = (cents) =>
+  (Number(cents) < 0 ? "-" : "") + money(cents);
 const today = () => new Date().toISOString().slice(0, 10);
 const initials = (name) =>
   String(name || "?")
@@ -32,8 +45,42 @@ const esc = (value) =>
         '"': "&quot;",
       })[character],
   );
-const avatar = (name, index = 0) =>
-  `<div class="avatar ${["orange", "purple", "blue", "pink", "green"][index % 5]}">${esc(initials(name))}</div>`;
+const avatar = (user, index = 0) => {
+  const person =
+    typeof user === "object" && user
+      ? user
+      : { name: user };
+  const image = person.avatar_image || "";
+  const style = [
+    person.avatar_color &&
+      "background-color:" + person.avatar_color,
+    image && "background-image:url('" + image + "')",
+  ]
+    .filter(Boolean)
+    .join(";");
+  const color = [
+    "orange",
+    "purple",
+    "blue",
+    "pink",
+    "green",
+  ][index % 5];
+  return `<div class="avatar ${color}${image ? " has-avatar-image" : ""}"${style ? ` style="${style}"` : ""}>${image ? "" : esc(person.avatar_emoji || initials(person.name))}</div>`;
+};
+function applyAvatar(element, user) {
+  const image = user?.avatar_image || "";
+  element.textContent = image
+    ? ""
+    : user?.avatar_emoji || initials(user?.name);
+  element.classList.toggle(
+    "has-avatar-image",
+    Boolean(image),
+  );
+  element.style.backgroundImage = image
+    ? 'url("' + image + '")'
+    : "";
+  element.style.backgroundColor = user?.avatar_color || "";
+}
 const categoryIcon = (category) =>
   ({
     food: "&#x1F35D;",
@@ -43,6 +90,43 @@ const categoryIcon = (category) =>
     transport: "&#x1F695;",
     settlement: "&#x2713;",
   })[category] || "&#x2726;";
+const emojiAndTextFromDescription = (description) => {
+  const text = String(description || "");
+  const emojiPattern =
+    /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+  if (typeof Intl.Segmenter === "function") {
+    const segments = [
+      ...new Intl.Segmenter(undefined, {
+        granularity: "grapheme",
+      }).segment(text),
+    ];
+    const emojiIndex = segments.findIndex(({ segment }) =>
+      emojiPattern.test(segment),
+    );
+    if (emojiIndex >= 0) {
+      return {
+        emoji: segments[emojiIndex].segment,
+        text: segments
+          .filter((_, index) => index !== emojiIndex)
+          .map(({ segment }) => segment)
+          .join("")
+          .replace(/\s{2,}/g, " ")
+          .trim(),
+      };
+    }
+  }
+  const match = text.match(emojiPattern);
+  return match
+    ? {
+        emoji: match[0],
+        text: text
+          .replace(match[0], "")
+          .replace(/[\uFE0E\uFE0F]/g, "")
+          .replace(/\s{2,}/g, " ")
+          .trim(),
+      }
+    : { emoji: "", text };
+};
 
 async function api(url, options = {}) {
   const base = (window.SPLITO_API_URL || "").replace(
@@ -111,11 +195,25 @@ function showOutdatedPageMessage() {
   if ($("#toast")) toast(message);
 }
 
+function showSignedInApp() {
+  document.body.classList.add("is-authenticated");
+  document.body.classList.remove("auth-pending");
+  $("#authScreen").classList.add("hidden");
+}
+
+function showAuthenticationScreen() {
+  document.body.classList.remove(
+    "is-authenticated",
+    "auth-pending",
+  );
+  $("#authScreen").classList.remove("hidden");
+}
+
 function updateAccountUI() {
   $("#profileName").textContent = me.name;
-  $("#profileAvatar").textContent = initials(me.name);
+  applyAvatar($("#profileAvatar"), me);
   $("#mobileProfileName").textContent = me.name;
-  $("#mobileProfileAvatar").textContent = initials(me.name);
+  applyAvatar($("#mobileProfileAvatar"), me);
   $("#mobileAccountSettingsBtn").setAttribute(
     "aria-label",
     `Open account settings for ${me.name}`,
@@ -135,27 +233,158 @@ function balanceFor(group, userId = me?.id) {
   );
 }
 
+function splitMethodLabel(entry) {
+  const labels = {
+    equal: "Split equally",
+    exact: "Exact amounts",
+    percentage: "By percentage",
+    shares: "By shares",
+    adjustment: "With adjustments",
+  };
+  if (labels[entry.split_method])
+    return labels[entry.split_method];
+  const amounts = (entry.splits || []).map((split) =>
+    Number(split.amount_cents),
+  );
+  const isEqual =
+    amounts.length > 0 &&
+    amounts.every(Number.isSafeInteger) &&
+    Math.max(...amounts) - Math.min(...amounts) <= 1;
+  return isEqual ? "Split equally" : "Custom amounts";
+}
+
+function expenseSplitDetailsMarkup(entry) {
+  if (!Array.isArray(entry.splits) || !entry.splits.length)
+    return "";
+  const payerId = Number(entry.paid_by);
+  const breakdown = entry.splits
+    .map((split) => {
+      const name = esc(split.name || "Member");
+      const amount = money(split.amount_cents);
+      return Number(split.user_id) === payerId
+        ? `${name}&#039;s share ${amount}`
+        : `${name} owes ${amount}`;
+    })
+    .join('<span class="split-separator">&middot;</span>');
+  return `<div class="expense-split-details"><span class="split-method-badge">${esc(splitMethodLabel(entry))}</span><span class="split-breakdown">${breakdown}</span></div>`;
+}
+
 function activityMarkup(entry, controls = false) {
   const date =
     entry.activity_date || entry.expense_date || "";
   const isSettlement = entry.entry_type === "settlement";
+  const description = isSettlement
+    ? { emoji: "", text: "" }
+    : entry.emoji
+      ? {
+          emoji: entry.emoji,
+          text: String(entry.description || "").trim(),
+        }
+      : emojiAndTextFromDescription(entry.description);
   const title = isSettlement
     ? `${entry.payer_name} settled up`
-    : entry.description;
+    : description.text || "Expense";
   const detail = isSettlement
     ? `${entry.group_name || "Group"} - ${date}`
     : `${entry.payer_name} paid - ${entry.group_name || activeGroup?.group.name || "Group"} - ${date}`;
+  const splitDetails = isSettlement
+    ? ""
+    : expenseSplitDetailsMarkup(entry);
+  const receipt = receiptLinkMarkup(entry);
   const actions = controls
     ? `<span class="entry-actions"><button class="entry-button" type="button" data-edit-expense="${entry.id}">Edit</button><button class="entry-button danger" type="button" data-delete-expense="${entry.id}">Delete</button></span>`
     : "";
-  return `<div class="activity-item"><div class="expense-icon">${categoryIcon(entry.category)}</div><div class="activity-main"><strong>${esc(title)}</strong><span>${esc(detail)}</span></div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
+  const icon = description.emoji
+    ? esc(description.emoji)
+    : categoryIcon(entry.category);
+  return `<div class="activity-item"><div class="expense-icon">${icon}</div><div class="activity-main"><strong>${esc(title)}</strong><span>${esc(detail)}</span>${splitDetails}${receipt}</div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
 }
 
 function settlementMarkup(entry, controls = false) {
   const actions = controls
     ? `<span class="entry-actions"><button class="entry-button" type="button" data-edit-settlement="${entry.id}">Edit</button><button class="entry-button danger" type="button" data-delete-settlement="${entry.id}">Delete</button></span>`
     : "";
-  return `<div class="activity-item"><div class="expense-icon">&#x2713;</div><div class="activity-main"><strong>${esc(entry.payer_name)} paid ${esc(entry.payee_name)}</strong><span>${esc(String(entry.settled_at).slice(0, 10))}</span></div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
+  return `<div class="activity-item"><div class="expense-icon">&#x2713;</div><div class="activity-main"><strong>${esc(entry.payer_name)} paid ${esc(entry.payee_name)}</strong><span>${esc(String(entry.settled_at).slice(0, 10))}</span>${receiptLinkMarkup(entry)}</div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
+}
+
+function receiptLinkMarkup(entry) {
+  if (!entry.receipt_image) return "";
+  return `<a class="entry-receipt" href="${esc(entry.receipt_image)}" target="_blank" rel="noopener">View receipt</a>`;
+}
+
+const localTips = [
+  {
+    quote:
+      "A good budget leaves room for joy and one surprisingly expensive coffee.",
+    author: "Splito",
+  },
+  {
+    quote:
+      "Money talks, but a clear split saves everyone from doing the awkward math.",
+    author: "Splito",
+  },
+  {
+    quote:
+      "The best group memories are priceless. The shared costs just need good notes.",
+    author: "Splito",
+  },
+];
+
+function showTip(tip) {
+  $("#tipQuote").textContent = tip.quote;
+  $("#tipAuthor").textContent = tip.author
+    ? `— ${tip.author}`
+    : "";
+  $("#tipAttribution").hidden = tip.source !== "zenquotes";
+}
+
+async function refreshTip() {
+  const request = ++tipRequest;
+  showTip(
+    localTips[Math.floor(Math.random() * localTips.length)],
+  );
+  try {
+    const result = await api("/tip");
+    if (request === tipRequest && result.tip)
+      showTip(result.tip);
+  } catch {
+    // The locally selected tip remains visible if the quote service is unavailable.
+  }
+}
+
+function activityPaginationMarkup() {
+  const pagination = dash.activityPagination;
+  if (!pagination || pagination.totalPages <= 1) return "";
+  const start =
+    (pagination.page - 1) * pagination.pageSize + 1;
+  const end = Math.min(
+    pagination.total,
+    pagination.page * pagination.pageSize,
+  );
+  return `<div class="activity-pagination" aria-label="Activity pagination"><span>Showing ${start}-${end} of ${pagination.total}</span><span class="activity-pagination-actions"><button class="entry-button" type="button" data-activity-page="${pagination.page - 1}" ${pagination.page === 1 ? "disabled" : ""}>Previous</button><span>Page ${pagination.page} of ${pagination.totalPages}</span><button class="entry-button" type="button" data-activity-page="${pagination.page + 1}" ${pagination.page === pagination.totalPages ? "disabled" : ""}>Next</button></span></div>`;
+}
+
+function friendBalanceMarkup(person, index) {
+  const balance = Number(person.balance_cents) || 0;
+  const status =
+    balance > 0
+      ? `${esc(person.name)} owes you`
+      : balance < 0
+        ? `You owe ${esc(person.name)}`
+        : "All settled up";
+  const settleButton = balance
+    ? `<button class="entry-button settle-friend-button" type="button" data-settle-friend="${person.id}">Settle</button>`
+    : "";
+  return `<div class="friend">${avatar(person, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.shared_group_count ? `${person.shared_group_count} shared group${person.shared_group_count === 1 ? "" : "s"}` : "No shared groups yet"}</small></div><div class="friend-balance ${balance < 0 ? "negative" : ""}"><small>${status}</small><b>${money(balance)}</b><span class="friend-actions">${settleButton}<button class="entry-button danger member-friend-button" type="button" data-unfriend="${person.id}">Unfriend</button></span></div></div>`;
+}
+
+function unsettledNonFriendMarkup(person, index) {
+  const balance = Number(person.balance_cents) || 0;
+  const status =
+    balance > 0
+      ? `${esc(person.name)} owes you`
+      : `You owe ${esc(person.name)}`;
+  return `<div class="friend">${avatar(person, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.shared_group_count} shared group${person.shared_group_count === 1 ? "" : "s"} · Not in your Friends list</small></div><div class="friend-balance ${balance < 0 ? "negative" : ""}"><small>${status}</small><b>${money(balance)}</b><span class="friend-actions"><button class="entry-button settle-friend-button" type="button" data-settle-friend="${person.id}">Settle</button><button class="entry-button member-friend-button" type="button" data-add-overview-friend="${person.id}">Add friend</button></span></div></div>`;
 }
 
 function render() {
@@ -207,21 +436,37 @@ function render() {
       .join("") || "<p>No activity yet.</p>";
   $("#recentActivity").innerHTML = activity;
   $("#allActivity").innerHTML = activity;
+  const pagination = activityPaginationMarkup();
+  $("#recentActivityPagination").innerHTML = pagination;
+  $("#allActivityPagination").innerHTML = pagination;
   const people =
     (dash.friends || [])
-      .map(
-        (person, index) =>
-          `<div class="friend">${avatar(person.name, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.shared_group_count ? `${person.shared_group_count} shared group${person.shared_group_count === 1 ? "" : "s"}` : "No shared groups yet"}</small></div><div class="friend-balance"><b>Friend</b><button class="entry-button danger member-friend-button" type="button" data-unfriend="${person.id}">Unfriend</button></div></div>`,
+      .map((person, index) =>
+        friendBalanceMarkup(person, index),
       )
       .join("") ||
     "<p>Add friends to your account, then select them when adding members to a group.</p>";
   $("#friendList").innerHTML = people;
   $("#allFriends").innerHTML = people;
+  const unsettledNonFriends =
+    dash.unsettled_non_friends || [];
+  $("#unsettledNonFriendsPanel").hidden =
+    !unsettledNonFriends.length;
+  $("#unsettledNonFriendsList").innerHTML =
+    unsettledNonFriends
+      .map((person, index) =>
+        unsettledNonFriendMarkup(person, index),
+      )
+      .join("");
 }
 
 async function load() {
-  dash = await api("/dashboard");
+  dash = await api(
+    `/dashboard?activityPage=${activityPage}&activityPageSize=8`,
+  );
+  activityPage = dash.activityPagination?.page || 1;
   render();
+  refreshTip();
 }
 
 function view(name) {
@@ -250,8 +495,14 @@ function view(name) {
 async function openGroup(groupId) {
   activeGroup = await api(`/groups/${groupId}`);
   const group = activeGroup.group;
+  const isGroupOwner =
+    Number(group.created_by) === Number(me.id);
+  $("#editGroupBtn").hidden = !isGroupOwner;
+  $("#deleteGroupBtn").hidden = !isGroupOwner;
   $("#detailTitle").textContent =
     `${group.emoji} ${group.name}`;
+  $("#detailOwner").textContent =
+    `Group owner: ${group.owner_name || "Unknown"}`;
   $("#detailMembers").textContent = activeGroup.members
     .map((person) => person.name)
     .join(" · ");
@@ -266,7 +517,7 @@ async function openGroup(groupId) {
           : friendIds.has(person.id)
             ? '<span class="member-friend-status">Friend</span>'
             : `<button class="entry-button member-friend-button" type="button" data-add-friend="${person.id}">Add friend</button>`;
-      return `<div class="friend">${avatar(person.name, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.balance_cents > 0 ? "is owed" : person.balance_cents < 0 ? "owes" : "is settled up"}</small></div><div class="friend-balance ${person.balance_cents < 0 ? "negative" : ""}"><b>${money(person.balance_cents)}</b>${friendAction}</div></div>`;
+      return `<div class="friend">${avatar(person, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.balance_cents > 0 ? "is owed" : person.balance_cents < 0 ? "owes" : "is settled up"}</small></div><div class="friend-balance ${person.balance_cents < 0 ? "negative" : ""}"><b>${money(person.balance_cents)}</b>${friendAction}</div></div>`;
     })
     .join("");
   $("#detailInvites").innerHTML =
@@ -278,24 +529,99 @@ async function openGroup(groupId) {
             ? invite.accepted_at
             : invite.created_at,
         ).slice(0, 16);
-        return `<div class="activity-item invite-item"><div class="expense-icon">&#x2709;&#xFE0F;</div><div class="activity-main"><strong>${esc(invite.email)}</strong><span>${completed ? "Accepted" : "Sent"} ${esc(date)}${invite.add_to_friends ? " - added to Friends on acceptance" : ""}</span></div><div class="invite-status ${completed ? "completed" : "pending"}">${completed ? "Completed" : "Pending"}</div></div>`;
+        const status = `<span class="invite-status ${completed ? "completed" : "pending"}">${completed ? "Completed" : "Pending"}</span>`;
+        const actions = completed
+          ? status
+          : `<div class="invite-actions"><button class="entry-button" type="button" data-copy-invite="${invite.id}">Copy link</button>${status}</div>`;
+        return `<div class="activity-item invite-item"><div class="expense-icon">&#x2709;&#xFE0F;</div><div class="activity-main"><strong>${esc(invite.email)}</strong><span>${completed ? "Accepted" : "Sent"} ${esc(date)}${invite.add_to_friends ? " - added to Friends on acceptance" : ""}</span></div>${actions}</div>`;
       })
       .join("") ||
     "<p>No invitations have been sent for this group.</p>";
   $("#detailExpenses").innerHTML =
     activeGroup.expenses
-      .map((entry) => activityMarkup(entry, true))
+      .map((entry) => activityMarkup(entry, isGroupOwner))
       .join("") || "<p>No expenses in this group yet.</p>";
   $("#detailSettlements").innerHTML =
     activeGroup.settlements
-      .map((entry) => settlementMarkup(entry, true))
+      .map((entry) => settlementMarkup(entry, isGroupOwner))
       .join("") || "<p>No settlements yet.</p>";
   view("group");
 }
 
 async function refreshAfterMutation(groupId) {
+  activityPage = 1;
   await load();
   await openGroup(groupId);
+}
+
+function isActiveGroupOwner() {
+  return Boolean(
+    activeGroup &&
+    Number(activeGroup.group.created_by) === Number(me?.id),
+  );
+}
+
+async function deleteGroup() {
+  if (!isActiveGroupOwner())
+    return toast(
+      "Only the group owner can delete this group.",
+    );
+  const groupId = activeGroup.group.id;
+  const groupName = activeGroup.group.name;
+  if (
+    !window.confirm(
+      `Delete ${groupName}? All group expenses, settlements, and invitations will be permanently deleted.`,
+    )
+  )
+    return;
+  try {
+    await api(`/groups/${groupId}`, { method: "DELETE" });
+    activeGroup = undefined;
+    await load();
+    view("dashboard");
+    toast(`${groupName} was deleted.`);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.append(field);
+  field.select();
+  const copied = document.execCommand("copy");
+  field.remove();
+  if (!copied)
+    throw Error("Your browser could not copy the link.");
+}
+
+async function copyInviteLink(inviteId) {
+  if (!activeGroup)
+    return toast(
+      "Open the group before copying its invite link.",
+    );
+  try {
+    const result = await api(
+      `/groups/${activeGroup.group.id}/invites/${inviteId}/link`,
+    );
+    await copyText(result.inviteUrl);
+    toast("Invite link copied to your clipboard.");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function openInviteLinkDialog(inviteUrl) {
+  $("#generatedInviteLink").value = inviteUrl;
+  openDialog($("#inviteLinkDialog"));
 }
 
 function openDialog(dialog) {
@@ -321,6 +647,28 @@ async function addGroupMemberAsFriend(friendId) {
     const groupId = activeGroup.group.id;
     await load();
     await openGroup(groupId);
+    toast(
+      `${result.friend.name} was added to your Friends list.`,
+    );
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function addOverviewPersonAsFriend(friendId) {
+  const person = (dash.unsettled_non_friends || []).find(
+    (nonFriend) => nonFriend.id === friendId,
+  );
+  if (!person)
+    return toast(
+      "That person no longer has an unsettled balance.",
+    );
+  try {
+    const result = await api("/friends", {
+      method: "POST",
+      body: JSON.stringify({ email: person.email }),
+    });
+    await load();
     toast(
       `${result.friend.name} was added to your Friends list.`,
     );
@@ -356,6 +704,453 @@ async function unfriend(friendId) {
   }
 }
 
+function selectedExpenseParticipants() {
+  return [...$("#expenseParticipants").selectedOptions]
+    .map((option) => ({
+      id: Number(option.value),
+      name: option.textContent.trim(),
+    }))
+    .filter((person) => Number.isSafeInteger(person.id));
+}
+
+function expenseAmountCents() {
+  const value = $("#expenseAmount").value;
+  if (value.trim() === "") return null;
+  const cents = Math.round(Number(value) * 100);
+  return Number.isSafeInteger(cents) && cents > 0
+    ? cents
+    : null;
+}
+
+function equalExpenseSplitCents(cents, count) {
+  if (!count) return [];
+  const each = Math.floor(cents / count);
+  const remainder = cents % count;
+  return Array.from(
+    { length: count },
+    (_, index) => each + (index < remainder ? 1 : 0),
+  );
+}
+
+function decimalValue(value) {
+  if (String(value ?? "").trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function valueInCents(value, allowNegative = false) {
+  const number = decimalValue(value);
+  const cents =
+    number === null ? null : Math.round(number * 100);
+  return Number.isSafeInteger(cents) &&
+    (allowNegative || cents >= 0)
+    ? cents
+    : null;
+}
+
+function defaultExpenseSplitValue(
+  mode,
+  index,
+  count,
+  cents,
+) {
+  if (mode === "exact") {
+    if (!cents) return "";
+    return (
+      equalExpenseSplitCents(cents, count)[index] / 100
+    ).toFixed(2);
+  }
+  if (mode === "percentage") {
+    const base = Math.floor(10000 / count) / 100;
+    const percentage =
+      index === count - 1 ? 100 - base * (count - 1) : base;
+    return String(Number(percentage.toFixed(2)));
+  }
+  if (mode === "shares") return "1";
+  return "0.00";
+}
+
+function hasExpenseSplitValue(userId) {
+  return Object.prototype.hasOwnProperty.call(
+    expenseSplitValues,
+    String(userId),
+  );
+}
+
+function rememberExpenseSplitValues() {
+  $$("#expenseSplitEditor [data-split-value]").forEach(
+    (input) => {
+      expenseSplitValues[input.dataset.splitValue] =
+        input.value;
+    },
+  );
+}
+
+function splitModeDetails(mode) {
+  return {
+    exact: {
+      label: "Amount (₹)",
+      copy: "Enter the exact amount owed by each selected member. The amounts must equal the expense total.",
+      input: 'min="0" step="0.01"',
+    },
+    percentage: {
+      label: "Percentage (%)",
+      copy: "Choose what percentage of the expense each selected member owes. Percentages must total 100%.",
+      input: 'min="0" step="0.01"',
+    },
+    shares: {
+      label: "Shares",
+      copy: "Give each selected member a relative number of shares, such as 1, 2, or 3.",
+      input: 'min="0.01" step="0.01"',
+    },
+    adjustment: {
+      label: "Adjustment (₹)",
+      copy: "Start with an equal split, then add or subtract an amount for each person. Adjustments must total ₹0.00.",
+      input: 'step="0.01"',
+    },
+  }[mode];
+}
+
+function setExpenseSplitSummary(message, isError = false) {
+  const summary = $("#expenseSplitSummary");
+  if (!summary) return;
+  summary.textContent = message;
+  summary.classList.toggle("error", isError);
+}
+
+function refreshExpenseSplitSummary() {
+  const mode = $("#expenseSplitMode").value;
+  const participants = selectedExpenseParticipants();
+  const cents = expenseAmountCents();
+  if (!participants.length) {
+    setExpenseSplitSummary(
+      "Select at least one person to split with.",
+      true,
+    );
+    return;
+  }
+  if (mode === "equal") {
+    if (!cents) {
+      setExpenseSplitSummary(
+        "Enter an expense amount to calculate the split.",
+      );
+      return;
+    }
+    const amounts = equalExpenseSplitCents(
+      cents,
+      participants.length,
+    );
+    const uniqueAmounts = [...new Set(amounts)];
+    const amountText = uniqueAmounts
+      .map(money)
+      .join(" and ");
+    setExpenseSplitSummary(
+      participants.length +
+        " " +
+        (participants.length === 1 ? "person" : "people") +
+        " will owe " +
+        amountText +
+        " each.",
+    );
+    return;
+  }
+  const values = $$(
+    "#expenseSplitEditor [data-split-value]",
+  ).map((input) => input.value);
+  if (values.length !== participants.length) return;
+  if (mode === "exact") {
+    const amounts = values.map((value) =>
+      valueInCents(value),
+    );
+    const assigned = amounts.reduce(
+      (total, amount) => total + (amount ?? 0),
+      0,
+    );
+    if (!cents) {
+      setExpenseSplitSummary(
+        "Enter an expense amount to check this split.",
+      );
+      return;
+    }
+    const valid = amounts.every(
+      (amount) => amount !== null,
+    );
+    setExpenseSplitSummary(
+      "Assigned " +
+        money(assigned) +
+        " of " +
+        money(cents) +
+        ".",
+      !valid || assigned !== cents,
+    );
+    return;
+  }
+  if (mode === "percentage") {
+    const percentages = values.map(decimalValue);
+    const total = percentages.reduce(
+      (sum, percentage) => sum + (percentage ?? 0),
+      0,
+    );
+    const valid = percentages.every(
+      (percentage) =>
+        percentage !== null && percentage >= 0,
+    );
+    setExpenseSplitSummary(
+      "Percentage total: " +
+        Number(total.toFixed(4)) +
+        "% of 100%.",
+      !valid || Math.abs(total - 100) > 0.000001,
+    );
+    return;
+  }
+  if (mode === "shares") {
+    const shares = values.map(decimalValue);
+    const total = shares.reduce(
+      (sum, share) => sum + (share ?? 0),
+      0,
+    );
+    const valid = shares.every(
+      (share) => share !== null && share > 0,
+    );
+    setExpenseSplitSummary(
+      "Total shares: " + Number(total.toFixed(4)) + ".",
+      !valid,
+    );
+    return;
+  }
+  const adjustments = values.map((value) =>
+    valueInCents(value, true),
+  );
+  const total = adjustments.reduce(
+    (sum, adjustment) => sum + (adjustment ?? 0),
+    0,
+  );
+  const equalAmounts = cents
+    ? equalExpenseSplitCents(cents, participants.length)
+    : [];
+  const valid =
+    adjustments.every(
+      (adjustment) => adjustment !== null,
+    ) &&
+    adjustments.every(
+      (adjustment, index) =>
+        !cents || equalAmounts[index] + adjustment >= 0,
+    );
+  setExpenseSplitSummary(
+    "Adjustments total: " + signedMoney(total) + ".",
+    !valid || total !== 0,
+  );
+}
+
+function renderExpenseSplitEditor() {
+  const editor = $("#expenseSplitEditor");
+  const mode = $("#expenseSplitMode").value;
+  const participants = selectedExpenseParticipants();
+  const cents = expenseAmountCents();
+  editor.hidden = false;
+  if (!participants.length) {
+    editor.innerHTML =
+      '<p class="split-editor-copy">Select people above to set up the split.</p><p class="split-summary" id="expenseSplitSummary"></p>';
+    refreshExpenseSplitSummary();
+    return;
+  }
+  if (mode === "equal") {
+    editor.innerHTML =
+      '<p class="split-editor-copy">The expense is divided evenly between the selected people. Any one-paise rounding difference is shared fairly.</p><p class="split-summary" id="expenseSplitSummary"></p>';
+    refreshExpenseSplitSummary();
+    return;
+  }
+  const details = splitModeDetails(mode);
+  const rows = participants
+    .map((person, index) => {
+      const value = hasExpenseSplitValue(person.id)
+        ? expenseSplitValues[String(person.id)]
+        : defaultExpenseSplitValue(
+            mode,
+            index,
+            participants.length,
+            cents,
+          );
+      return (
+        '<label class="split-row"><strong>' +
+        esc(person.name) +
+        '</strong><input type="number" aria-label="' +
+        esc(details.label) +
+        " for " +
+        esc(person.name) +
+        '" data-split-value="' +
+        person.id +
+        '" value="' +
+        esc(value) +
+        '" ' +
+        details.input +
+        "></label>"
+      );
+    })
+    .join("");
+  editor.innerHTML =
+    '<p class="split-editor-copy">' +
+    esc(details.copy) +
+    "</p>" +
+    rows +
+    '<p class="split-summary" id="expenseSplitSummary"></p>';
+  refreshExpenseSplitSummary();
+}
+
+function expenseSplitPayload() {
+  const cents = expenseAmountCents();
+  const participants = selectedExpenseParticipants();
+  const mode = $("#expenseSplitMode").value;
+  if (!cents)
+    return { error: "Enter a valid expense amount." };
+  if (!participants.length)
+    return {
+      error: "Select at least one person to split with.",
+    };
+  if (mode === "equal") return { mode, splits: [] };
+  const values = $$(
+    "#expenseSplitEditor [data-split-value]",
+  ).map((input) => input.value);
+  if (values.length !== participants.length)
+    return {
+      error:
+        "Enter a split value for every selected member.",
+    };
+  if (mode === "exact") {
+    const amounts = values.map((value) =>
+      valueInCents(value),
+    );
+    if (
+      amounts.some((amount) => amount === null) ||
+      amounts.reduce(
+        (total, amount) => total + amount,
+        0,
+      ) !== cents
+    )
+      return {
+        error:
+          "Exact split amounts must add up to the expense total.",
+      };
+  } else if (mode === "percentage") {
+    const percentages = values.map(decimalValue);
+    const total = percentages.reduce(
+      (sum, percentage) => sum + (percentage ?? 0),
+      0,
+    );
+    if (
+      percentages.some(
+        (percentage) =>
+          percentage === null || percentage < 0,
+      ) ||
+      Math.abs(total - 100) > 0.000001
+    )
+      return {
+        error: "Split percentages must add up to 100%.",
+      };
+  } else if (mode === "shares") {
+    const shares = values.map(decimalValue);
+    if (
+      shares.some((share) => share === null || share <= 0)
+    )
+      return {
+        error:
+          "Each selected member needs a positive number of shares.",
+      };
+  } else {
+    const adjustments = values.map((value) =>
+      valueInCents(value, true),
+    );
+    const equalAmounts = equalExpenseSplitCents(
+      cents,
+      participants.length,
+    );
+    if (
+      adjustments.some(
+        (adjustment) => adjustment === null,
+      ) ||
+      adjustments.reduce(
+        (total, adjustment) => total + adjustment,
+        0,
+      ) !== 0
+    )
+      return {
+        error: "Split adjustments must add up to ₹0.00.",
+      };
+    if (
+      adjustments.some(
+        (adjustment, index) =>
+          equalAmounts[index] + adjustment < 0,
+      )
+    )
+      return {
+        error:
+          "An adjustment cannot make a member's share negative.",
+      };
+  }
+  return {
+    mode,
+    splits: participants.map((person, index) => ({
+      userId: person.id,
+      value: values[index],
+    })),
+  };
+}
+
+function initializeExpenseSplitEditor(entry) {
+  expenseSplitValues = {};
+  const splits = entry?.splits || [];
+  const splitCents = splits.map((split) =>
+    Number(split.amount_cents),
+  );
+  const total = splitCents.reduce(
+    (sum, amount) => sum + amount,
+    0,
+  );
+  const isEqual =
+    splitCents.length > 0 &&
+    splitCents.every(Number.isSafeInteger) &&
+    total === entry?.amount_cents &&
+    Math.max(...splitCents) - Math.min(...splitCents) <= 1;
+  const storedMode = [
+    "equal",
+    "exact",
+    "percentage",
+    "shares",
+    "adjustment",
+  ].includes(entry?.split_method)
+    ? entry.split_method
+    : isEqual
+      ? "equal"
+      : "exact";
+  $("#expenseSplitMode").value = storedMode;
+  if (entry && storedMode !== "equal") {
+    const equalAmounts = equalExpenseSplitCents(
+      entry.amount_cents,
+      splits.length,
+    );
+    expenseSplitValues = Object.fromEntries(
+      splits.map((split, index) => {
+        const cents = Number(split.amount_cents);
+        const value =
+          storedMode === "percentage"
+            ? ((cents / entry.amount_cents) * 100).toFixed(
+                6,
+              )
+            : storedMode === "adjustment"
+              ? (
+                  (cents - equalAmounts[index]) /
+                  100
+                ).toFixed(2)
+              : storedMode === "shares"
+                ? String(cents)
+                : (cents / 100).toFixed(2);
+        return [String(split.user_id), value];
+      }),
+    );
+  }
+  renderExpenseSplitEditor();
+}
+
 async function populateExpenseMembers(
   groupId,
   selected = [],
@@ -377,6 +1172,7 @@ async function populateExpenseMembers(
         `<option value="${person.id}" ${participants.has(person.id) ? "selected" : ""}>${esc(person.name)}</option>`,
     )
     .join("");
+  renderExpenseSplitEditor();
 }
 
 async function openExpense(entry) {
@@ -385,6 +1181,12 @@ async function openExpense(entry) {
   const form = $("#expenseForm");
   const groupSelect = $("#expenseGroup");
   form.reset();
+  expenseReceiptImage = entry?.receipt_image || "";
+  $("#expenseReceipt").value = "";
+  updateReceiptPreview("expense");
+  setExpenseEmojiPicker(false);
+  expenseSplitValues = {};
+  $("#expenseSplitMode").value = "equal";
   form.elements.entryId.value = entry?.id || "";
   $("#expenseDialogEyebrow").textContent = entry
     ? "EDIT EXPENSE"
@@ -407,21 +1209,34 @@ async function openExpense(entry) {
     activeGroup?.group.id ||
     dash.groups[0].id;
   groupSelect.value = groupId;
-  form.elements.description.value =
-    entry?.description || "";
+  const legacyDescription = entry?.emoji
+    ? { emoji: entry.emoji, text: entry.description }
+    : emojiAndTextFromDescription(entry?.description);
+  form.elements.emoji.value = entry
+    ? legacyDescription.emoji
+    : "✨";
+  form.elements.description.value = entry
+    ? legacyDescription.text
+    : "";
   form.elements.amount.value = entry
     ? (entry.amount_cents / 100).toFixed(2)
     : "";
   form.elements.date.value = entry?.expense_date || today();
   form.elements.category.value = entry?.category || "other";
   form.elements.notes.value = entry?.notes || "";
-  groupSelect.onchange = () =>
-    populateExpenseMembers(groupSelect.value);
+  groupSelect.onchange = () => {
+    expenseSplitValues = {};
+    $("#expenseSplitMode").value = "equal";
+    populateExpenseMembers(groupSelect.value).catch(
+      (error) => toast(error.message),
+    );
+  };
   await populateExpenseMembers(
     groupId,
     entry?.splits?.map((split) => split.user_id),
     entry?.paid_by || me.id,
   );
+  initializeExpenseSplitEditor(entry);
   openDialog($("#expenseDialog"));
 }
 
@@ -431,6 +1246,7 @@ function openGroupDialog(group) {
   form.elements.groupId.value = group?.id || "";
   form.elements.name.value = group?.name || "";
   form.elements.emoji.value = group?.emoji || "";
+  setGroupEmojiPicker(false);
   $("#groupDialogEyebrow").textContent = group
     ? "EDIT GROUP"
     : "NEW GROUP";
@@ -443,9 +1259,462 @@ function openGroupDialog(group) {
   openDialog($("#groupDialog"));
 }
 
+function setGroupEmojiPicker(isOpen) {
+  $("#groupEmojiPicker").hidden = !isOpen;
+}
+
+function chooseGroupEmoji(emoji) {
+  const input = $("#groupEmoji");
+  input.value = emoji;
+  input.focus();
+  setGroupEmojiPicker(false);
+}
+
+function setExpenseEmojiPicker(isOpen) {
+  $("#expenseEmojiPicker").hidden = !isOpen;
+}
+
+function chooseExpenseEmoji(emoji) {
+  const input = $("#expenseEmoji");
+  input.value = emoji;
+  input.focus();
+  setExpenseEmojiPicker(false);
+}
+
+function setAccountAvatarEmojiPicker(isOpen) {
+  $("#accountAvatarEmojiPicker").hidden = !isOpen;
+}
+
+function updateAccountAvatarPreview() {
+  const form = $("#accountForm");
+  applyAvatar($("#accountAvatarPreview"), {
+    name: form.elements.name.value || me.name,
+    avatar_emoji: form.elements.avatarEmoji.value,
+    avatar_image: accountAvatarImage,
+    avatar_color: form.elements.avatarColor.value,
+  });
+}
+
+function updateAccountAvatarColorButtons() {
+  const color =
+    $("#accountForm").elements.avatarColor.value;
+  $("#accountAvatarColorPicker").value = color;
+  $$("[data-account-avatar-color]").forEach((button) => {
+    button.setAttribute(
+      "aria-pressed",
+      String(button.dataset.accountAvatarColor === color),
+    );
+  });
+}
+
+function chooseAccountAvatarColor(color) {
+  $("#accountForm").elements.avatarColor.value =
+    String(color).toLowerCase();
+  updateAccountAvatarColorButtons();
+  updateAccountAvatarPreview();
+}
+
+function chooseAccountAvatarEmoji(emoji) {
+  $("#accountAvatarEmoji").value = emoji;
+  updateAccountAvatarPreview();
+  setAccountAvatarEmojiPicker(false);
+}
+
+function imageForAccountAvatar(file) {
+  if (!file)
+    return Promise.reject(
+      Error("Choose a JPG, PNG, or WebP profile image."),
+    );
+  if (
+    !["image/jpeg", "image/png", "image/webp"].includes(
+      file.type,
+    )
+  )
+    return Promise.reject(
+      Error("Choose a JPG, PNG, or WebP profile image."),
+    );
+  if (file.size > 5 * 1024 * 1024)
+    return Promise.reject(
+      Error("Choose a profile image smaller than 5 MB."),
+    );
+  const objectUrl = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const largestSide = 256;
+      const scale = Math.min(
+        1,
+        largestSide /
+          Math.max(image.naturalWidth, image.naturalHeight),
+      );
+      const width = Math.max(
+        1,
+        Math.round(image.naturalWidth * scale),
+      );
+      const height = Math.max(
+        1,
+        Math.round(image.naturalHeight * scale),
+      );
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      let dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+      if (dataUrl.length > 180000)
+        dataUrl = canvas.toDataURL("image/jpeg", 0.65);
+      if (dataUrl.length > 180000) {
+        reject(
+          Error(
+            "This image is too detailed to save. Choose a simpler photo.",
+          ),
+        );
+        return;
+      }
+      resolve(dataUrl);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(
+        Error("The selected image could not be read."),
+      );
+    };
+    image.src = objectUrl;
+  });
+}
+
+function receiptImageBytes(dataUrl) {
+  const encoded = String(dataUrl || "").split(",")[1] || "";
+  const padding = encoded.endsWith("==")
+    ? 2
+    : encoded.endsWith("=")
+      ? 1
+      : 0;
+  return (encoded.length * 3) / 4 - padding;
+}
+
+function receiptImageSizeLabel(dataUrl) {
+  return `${Math.max(1, Math.ceil(receiptImageBytes(dataUrl) / 1024))} KB`;
+}
+
+function imageForReceipt(file) {
+  if (!file)
+    return Promise.reject(
+      Error("Choose a JPG, PNG, or WebP receipt image."),
+    );
+  if (
+    !["image/jpeg", "image/png", "image/webp"].includes(
+      file.type,
+    )
+  )
+    return Promise.reject(
+      Error("Choose a JPG, PNG, or WebP receipt image."),
+    );
+  if (file.size > 12 * 1024 * 1024)
+    return Promise.reject(
+      Error("Choose a receipt image smaller than 12 MB."),
+    );
+  const objectUrl = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const largestSide = 1600;
+      const baseScale = Math.min(
+        1,
+        largestSide /
+          Math.max(image.naturalWidth, image.naturalHeight),
+      );
+      const baseWidth = Math.max(
+        1,
+        Math.round(image.naturalWidth * baseScale),
+      );
+      const baseHeight = Math.max(
+        1,
+        Math.round(image.naturalHeight * baseScale),
+      );
+      for (const scale of [1, 0.85, 0.7, 0.55, 0.4]) {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(
+          1,
+          Math.round(baseWidth * scale),
+        );
+        canvas.height = Math.max(
+          1,
+          Math.round(baseHeight * scale),
+        );
+        const context = canvas.getContext("2d");
+        if (!context) continue;
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(
+          image,
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+        for (const quality of [0.82, 0.72, 0.62, 0.52]) {
+          const dataUrl = canvas.toDataURL(
+            "image/jpeg",
+            quality,
+          );
+          if (
+            receiptImageBytes(dataUrl) <=
+            maxReceiptImageBytes
+          ) {
+            resolve(dataUrl);
+            return;
+          }
+        }
+      }
+      reject(
+        Error(
+          "This receipt image is too detailed to compress below 500 KB. Choose a simpler image.",
+        ),
+      );
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(
+        Error(
+          "The selected receipt image could not be read.",
+        ),
+      );
+    };
+    image.src = objectUrl;
+  });
+}
+
+function receiptImageFor(kind) {
+  return kind === "expense"
+    ? expenseReceiptImage
+    : settlementReceiptImage;
+}
+
+function setReceiptImage(kind, dataUrl) {
+  if (kind === "expense") expenseReceiptImage = dataUrl;
+  else settlementReceiptImage = dataUrl;
+}
+
+function updateReceiptPreview(kind) {
+  const dataUrl = receiptImageFor(kind);
+  const preview = $(`#${kind}ReceiptPreview`);
+  preview.hidden = !dataUrl;
+  $(`#${kind}ReceiptPreviewImage`).src = dataUrl || "";
+  $(`#${kind}ReceiptStatus`).textContent = dataUrl
+    ? `Receipt ready (${receiptImageSizeLabel(dataUrl)}). It will be saved under the 500 KB limit.`
+    : "JPG, PNG, or WebP. It is compressed to a JPEG under 500 KB before saving.";
+}
+
+async function chooseReceiptImage(kind, input) {
+  try {
+    const dataUrl = await imageForReceipt(input.files[0]);
+    setReceiptImage(kind, dataUrl);
+    updateReceiptPreview(kind);
+    toast("Receipt ready to save.");
+  } catch (error) {
+    input.value = "";
+    toast(error.message);
+  }
+}
+
+function removeReceiptImage(kind) {
+  setReceiptImage(kind, "");
+  $(`#${kind}Receipt`).value = "";
+  updateReceiptPreview(kind);
+}
+
+const groupEmojiOptions = [
+  "✨",
+  "🎉",
+  "🎊",
+  "🎈",
+  "🎂",
+  "🎁",
+  "❤️",
+  "💛",
+  "💚",
+  "💙",
+  "💜",
+  "⭐",
+  "🌈",
+  "🔥",
+  "✈️",
+  "🚗",
+  "🚙",
+  "🚕",
+  "🚌",
+  "🚆",
+  "🚇",
+  "🚲",
+  "🛵",
+  "🚤",
+  "⛵",
+  "🛳️",
+  "🚢",
+  "⛺",
+  "🏕️",
+  "🏖️",
+  "🏝️",
+  "🗺️",
+  "🧳",
+  "🧭",
+  "🍽️",
+  "🍕",
+  "🍔",
+  "🍟",
+  "🌮",
+  "🌯",
+  "🍣",
+  "🍜",
+  "🍛",
+  "🍝",
+  "🥗",
+  "🍗",
+  "🍰",
+  "🧁",
+  "🍩",
+  "🍪",
+  "☕",
+  "🍵",
+  "🍺",
+  "🍷",
+  "🍹",
+  "🥂",
+  "🏠",
+  "🏡",
+  "🏢",
+  "🏨",
+  "🏰",
+  "🛋️",
+  "🛏️",
+  "🪴",
+  "🧹",
+  "🔑",
+  "🧺",
+  "🧼",
+  "🪑",
+  "🚪",
+  "🏗️",
+  "👥",
+  "💬",
+  "📸",
+  "🎵",
+  "🎤",
+  "🎧",
+  "🎬",
+  "🎭",
+  "🎨",
+  "🎮",
+  "🎲",
+  "🎯",
+  "⚽",
+  "🏏",
+  "🏸",
+  "🏋️",
+  "🤸",
+  "🧘",
+  "🏊",
+  "🚴",
+  "🏃",
+  "💼",
+  "📚",
+  "📝",
+  "💻",
+  "🖥️",
+  "📱",
+  "🧪",
+  "🔬",
+  "🛠️",
+  "📈",
+  "📊",
+  "🗓️",
+  "💡",
+  "💸",
+  "💰",
+  "🪙",
+  "🧾",
+  "🛒",
+  "🎟️",
+  "🏷️",
+  "🌿",
+  "🍀",
+  "🌻",
+  "🌸",
+  "🌲",
+  "⛰️",
+  "🌙",
+  "☀️",
+  "❄️",
+  "🍂",
+  "🐾",
+  "🐶",
+  "🐱",
+  "🇮🇳",
+];
+
+function renderEmojiPicker(pickerSelector, emojiAttribute) {
+  const picker = $(pickerSelector);
+  picker.innerHTML = [...new Set(groupEmojiOptions)]
+    .map(
+      (emoji) =>
+        `<button type="button" ${emojiAttribute}="${esc(emoji)}" aria-label="Use ${esc(emoji)}">${esc(emoji)}</button>`,
+    )
+    .join("");
+}
+
+function updateSettlementFriendBalance(autoFill = false) {
+  const payerId = Number($("#settlePayer").value);
+  const payeeId = Number($("#settlePayee").value);
+  const currentUserId = Number(me.id);
+  const friendId =
+    payerId === currentUserId
+      ? payeeId
+      : payeeId === currentUserId
+        ? payerId
+        : null;
+  const friend = (dash.friends || []).find(
+    (person) => Number(person.id) === friendId,
+  );
+  const balance = Number(friend?.balance_cents) || 0;
+  const isPaymentInOwedDirection =
+    (payerId === currentUserId &&
+      payeeId === Number(friend?.id) &&
+      balance < 0) ||
+    (payerId === Number(friend?.id) &&
+      payeeId === currentUserId &&
+      balance > 0);
+  const context = $("#settleContext");
+
+  if (!friend || !balance || !isPaymentInOwedDirection) {
+    context.hidden = true;
+    return;
+  }
+
+  const amount = money(balance);
+  context.hidden = false;
+  context.textContent =
+    balance < 0
+      ? `You owe ${friend.name} ${amount} across your shared groups. The amount is filled in; change it for a partial payment.`
+      : `${friend.name} owes you ${amount} across your shared groups. The amount is filled in; change it for a partial payment.`;
+  if (autoFill) {
+    $("#settleForm").elements.amount.value = (
+      Math.abs(balance) / 100
+    ).toFixed(2);
+  }
+}
+
 async function populateSettlementMembers(
   groupId,
   selected = {},
+  {
+    showFriendBalance = false,
+    autoFillBalance = false,
+  } = {},
 ) {
   const group = await api(`/groups/${groupId}`);
   const payer = $("#settlePayer");
@@ -474,48 +1743,112 @@ async function populateSettlementMembers(
       payee.value = selected.paidTo;
     }
   };
-  payer.onchange = setPayees;
+  const refreshFriendBalance = () => {
+    if (showFriendBalance)
+      updateSettlementFriendBalance(autoFillBalance);
+  };
+  payer.onchange = () => {
+    setPayees();
+    refreshFriendBalance();
+  };
+  payee.onchange = refreshFriendBalance;
   setPayees();
+  refreshFriendBalance();
 }
 
-async function openSettlement(entry) {
+function sharedGroupsForFriend(friend) {
+  const groupIds = new Set(
+    String(friend.shared_group_ids || "")
+      .split(",")
+      .map(Number)
+      .filter(Number.isSafeInteger),
+  );
+  return (dash.groups || []).filter((group) =>
+    groupIds.has(Number(group.id)),
+  );
+}
+
+async function openSettlement(entry, directFriend) {
   if (!dash.groups.length)
     return toast("Create a group first.");
+  const directBalance =
+    Number(directFriend?.balance_cents) || 0;
+  if (directFriend && !directBalance)
+    return toast(
+      `You and ${directFriend.name} are settled up.`,
+    );
+  const settlementGroups = directFriend
+    ? sharedGroupsForFriend(directFriend)
+    : dash.groups;
+  if (!settlementGroups.length)
+    return toast(
+      `You need a shared group with ${directFriend.name} to record this payment.`,
+    );
   const form = $("#settleForm");
   const groupSelect = $("#settleGroup");
   form.reset();
+  settlementReceiptImage = entry?.receipt_image || "";
+  $("#settlementReceipt").value = "";
+  updateReceiptPreview("settlement");
   form.elements.entryId.value = entry?.id || "";
   $("#settleDialogEyebrow").textContent = entry
     ? "EDIT SETTLEMENT"
-    : "SETTLE A BALANCE";
+    : directFriend
+      ? "SETTLE WITH A FRIEND"
+      : "SETTLE A BALANCE";
   $("#settleDialogTitle").textContent = entry
     ? "Edit payment"
-    : "Record a payment";
+    : directFriend
+      ? `Settle with ${directFriend.name}`
+      : "Record a payment";
   $("#settleSubmit").textContent = entry
     ? "Save changes"
     : "Record payment";
   groupSelect.disabled = Boolean(entry);
-  groupSelect.innerHTML = dash.groups
+  groupSelect.innerHTML = settlementGroups
     .map(
       (group) =>
         `<option value="${group.id}">${esc(group.emoji)} ${esc(group.name)}</option>`,
     )
     .join("");
+  const selected = entry
+    ? { paidBy: entry.paid_by, paidTo: entry.paid_to }
+    : directFriend
+      ? directBalance > 0
+        ? { paidBy: directFriend.id, paidTo: me.id }
+        : { paidBy: me.id, paidTo: directFriend.id }
+      : { paidBy: me.id };
   const groupId =
     entry?.group_id ||
-    activeGroup?.group.id ||
-    dash.groups[0].id;
+    (settlementGroups.some(
+      (group) =>
+        Number(group.id) === Number(activeGroup?.group.id),
+    )
+      ? activeGroup?.group.id
+      : settlementGroups[0].id);
   groupSelect.value = groupId;
   form.elements.amount.value = entry
     ? (entry.amount_cents / 100).toFixed(2)
-    : "";
+    : directFriend
+      ? (Math.abs(directBalance) / 100).toFixed(2)
+      : "";
   form.elements.settledAt.value =
     entry?.settled_at?.slice(0, 10) || today();
+  const showFriendBalance = !entry && !directFriend;
   groupSelect.onchange = () =>
-    populateSettlementMembers(groupSelect.value);
-  await populateSettlementMembers(groupId, {
-    paidBy: entry?.paid_by || me.id,
-    paidTo: entry?.paid_to,
+    populateSettlementMembers(groupSelect.value, selected, {
+      showFriendBalance,
+      autoFillBalance: showFriendBalance,
+    });
+  $("#settleContext").hidden = !directFriend;
+  if (directFriend)
+    $("#settleContext").textContent =
+      directBalance > 0
+        ? `${directFriend.name} owes you ${money(directBalance)}. Choose the shared group for this payment.`
+        : `You owe ${directFriend.name} ${money(directBalance)}. Choose the shared group for this payment.`;
+  await populateSettlementMembers(groupId, selected, {
+    showFriendBalance,
+    autoFillBalance: showFriendBalance,
   });
   if (!$("#settlePayee").options.length) {
     return toast(
@@ -566,6 +1899,14 @@ function openAccountSettings() {
   form.reset();
   form.elements.name.value = me.name;
   form.elements.email.value = me.email;
+  form.elements.avatarEmoji.value = me.avatar_emoji || "";
+  form.elements.avatarColor.value =
+    me.avatar_color || defaultAvatarColor;
+  accountAvatarImage = me.avatar_image || "";
+  $("#accountAvatarImage").value = "";
+  setAccountAvatarEmojiPicker(false);
+  updateAccountAvatarColorButtons();
+  updateAccountAvatarPreview();
   openDialog($("#accountDialog"));
 }
 
@@ -648,10 +1989,9 @@ $("#authForm").onsubmit = async (event) => {
     token = result.token;
     me = result.user;
     localStorage.setItem("splito-token", token);
-    document.body.classList.add("is-authenticated");
-    $("#authScreen").classList.add("hidden");
     updateAccountUI();
     await load();
+    showSignedInApp();
     await acceptInvite();
   } catch (error) {
     $("#authError").textContent = error.message;
@@ -739,6 +2079,90 @@ if (resetPasswordForm) {
   };
 }
 
+renderEmojiPicker("#groupEmojiPicker", "data-group-emoji");
+renderEmojiPicker(
+  "#expenseEmojiPicker",
+  "data-expense-emoji",
+);
+renderEmojiPicker(
+  "#accountAvatarEmojiPicker",
+  "data-account-avatar-emoji",
+);
+const groupEmojiInput = $("#groupEmoji");
+groupEmojiInput.onfocus = () => setGroupEmojiPicker(true);
+groupEmojiInput.onclick = () => setGroupEmojiPicker(true);
+const expenseEmojiInput = $("#expenseEmoji");
+expenseEmojiInput.onfocus = () =>
+  setExpenseEmojiPicker(true);
+expenseEmojiInput.onclick = () =>
+  setExpenseEmojiPicker(true);
+const accountAvatarEmojiInput = $("#accountAvatarEmoji");
+accountAvatarEmojiInput.onfocus = () =>
+  setAccountAvatarEmojiPicker(true);
+accountAvatarEmojiInput.onclick = () =>
+  setAccountAvatarEmojiPicker(true);
+$("#accountAvatarColorPicker").oninput = (event) =>
+  chooseAccountAvatarColor(event.currentTarget.value);
+$("#accountForm").elements.name.oninput =
+  updateAccountAvatarPreview;
+$("#accountAvatarImage").onchange = async (event) => {
+  const input = event.currentTarget;
+  try {
+    accountAvatarImage = await imageForAccountAvatar(
+      input.files[0],
+    );
+    updateAccountAvatarPreview();
+    toast("Profile photo ready to save.");
+  } catch (error) {
+    input.value = "";
+    toast(error.message);
+  }
+};
+$("#removeAccountAvatarImageBtn").onclick = () => {
+  accountAvatarImage = "";
+  $("#accountAvatarImage").value = "";
+  updateAccountAvatarPreview();
+};
+$("#expenseReceipt").onchange = (event) =>
+  chooseReceiptImage("expense", event.currentTarget);
+$("#settlementReceipt").onchange = (event) =>
+  chooseReceiptImage("settlement", event.currentTarget);
+$("#removeExpenseReceipt").onclick = () =>
+  removeReceiptImage("expense");
+$("#removeSettlementReceipt").onclick = () =>
+  removeReceiptImage("settlement");
+$("#expenseParticipants").onchange = () => {
+  rememberExpenseSplitValues();
+  renderExpenseSplitEditor();
+};
+$("#expenseSplitMode").onchange = () => {
+  expenseSplitValues = {};
+  renderExpenseSplitEditor();
+};
+$("#expenseAmount").oninput = () => {
+  if (
+    $("#expenseSplitMode").value === "exact" &&
+    !Object.keys(expenseSplitValues).length
+  ) {
+    renderExpenseSplitEditor();
+    return;
+  }
+  refreshExpenseSplitSummary();
+};
+$("#expenseSplitEditor").oninput = (event) => {
+  if (!event.target.matches("[data-split-value]")) return;
+  expenseSplitValues[event.target.dataset.splitValue] =
+    event.target.value;
+  refreshExpenseSplitSummary();
+};
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest(".emoji-control")) {
+    setGroupEmojiPicker(false);
+    setExpenseEmojiPicker(false);
+    setAccountAvatarEmojiPicker(false);
+  }
+});
+
 $("#newGroupBtn").onclick = () => openGroupDialog();
 $("#mobileNewGroupBtn").onclick = () => openGroupDialog();
 $("#accountSettingsBtn").onclick = openAccountSettings;
@@ -749,7 +2173,17 @@ $("#accountDialogLogoutBtn").onclick = signOut;
 $("#compactGroupsBtn").onclick = showGroups;
 $("#mobileGroupsBtn").onclick = showGroups;
 $("#editGroupBtn").onclick = () =>
-  activeGroup && openGroupDialog(activeGroup.group);
+  isActiveGroupOwner() &&
+  openGroupDialog(activeGroup.group);
+$("#deleteGroupBtn").onclick = deleteGroup;
+$("#copyGeneratedInviteLinkBtn").onclick = async () => {
+  try {
+    await copyText($("#generatedInviteLink").value);
+    toast("Invite link copied to your clipboard.");
+  } catch (error) {
+    toast(error.message);
+  }
+};
 $("#addExpenseBtn").onclick = () =>
   openExpense().catch((error) => toast(error.message));
 $("#detailExpenseBtn").onclick = () =>
@@ -766,6 +2200,10 @@ $("#groupForm").onsubmit = async (event) => {
   event.preventDefault();
   const fields = new FormData(event.currentTarget);
   const groupId = fields.get("groupId");
+  if (groupId && !isActiveGroupOwner()) {
+    toast("Only the group owner can edit this group.");
+    return;
+  }
   try {
     const result = await api(
       groupId ? `/groups/${groupId}` : "/groups",
@@ -801,10 +2239,14 @@ $("#accountForm").onsubmit = async (event) => {
         email: fields.get("email"),
         currentPassword: fields.get("currentPassword"),
         newPassword,
+        avatarEmoji: fields.get("avatarEmoji"),
+        avatarImage: accountAvatarImage,
+        avatarColor: fields.get("avatarColor"),
       }),
     });
     token = result.token;
     me = result.user;
+    accountAvatarImage = me.avatar_image || "";
     localStorage.setItem("splito-token", token);
     updateAccountUI();
     closeDialog($("#accountDialog"));
@@ -824,6 +2266,11 @@ $("#expenseForm").onsubmit = async (event) => {
   const groupId = entryId
     ? activeGroup.group.id
     : fields.get("group");
+  const split = expenseSplitPayload();
+  if (split.error) {
+    toast(split.error);
+    return;
+  }
   try {
     await api(
       entryId
@@ -833,12 +2280,16 @@ $("#expenseForm").onsubmit = async (event) => {
         method: entryId ? "PUT" : "POST",
         body: JSON.stringify({
           description: fields.get("description"),
+          emoji: fields.get("emoji"),
           amount: fields.get("amount"),
           paidBy: fields.get("payer"),
           participants: fields.getAll("participants"),
+          splitMode: split.mode,
+          splits: split.splits,
           date: fields.get("date"),
           category: fields.get("category"),
           notes: fields.get("notes"),
+          receiptImage: expenseReceiptImage,
         }),
       },
     );
@@ -869,6 +2320,7 @@ $("#settleForm").onsubmit = async (event) => {
           paidTo: fields.get("payee"),
           amount: fields.get("amount"),
           settledAt: fields.get("settledAt"),
+          receiptImage: settlementReceiptImage,
         }),
       },
     );
@@ -899,13 +2351,9 @@ $("#inviteForm").onsubmit = async (event) => {
     });
     closeDialog($("#inviteDialog"));
     await refreshAfterMutation(groupId);
-    if (result.debugInviteUrl) {
-      window.prompt(
-        "Local email is not configured. Copy this invite link",
-        result.debugInviteUrl,
-      );
-    } else
-      toast(`Invitation email sent to ${result.email}.`);
+    if (result.debugInviteUrl)
+      openInviteLinkDialog(result.debugInviteUrl);
+    else toast(`Invitation email sent to ${result.email}.`);
   } catch (error) {
     toast(error.message);
   }
@@ -956,6 +2404,13 @@ $("#friendForm").onsubmit = async (event) => {
 
 async function deleteEntry(type, entryId, label) {
   if (
+    ["expenses", "settlements"].includes(type) &&
+    !isActiveGroupOwner()
+  )
+    return toast(
+      `Only the group owner can delete ${label}s.`,
+    );
+  if (
     !activeGroup ||
     !window.confirm(
       `Delete this ${label}? This cannot be undone.`,
@@ -978,11 +2433,32 @@ $("#backToDashboard").onclick = () => view("dashboard");
 $("#seeGroups").onclick = showGroups;
 
 document.addEventListener("click", (event) => {
+  const groupEmoji = event.target.closest(
+    "[data-group-emoji]",
+  );
+  const expenseEmoji = event.target.closest(
+    "[data-expense-emoji]",
+  );
+  const accountAvatarEmoji = event.target.closest(
+    "[data-account-avatar-emoji]",
+  );
+  const accountAvatarColor = event.target.closest(
+    "[data-account-avatar-color]",
+  );
+  const activityPageButton = event.target.closest(
+    "[data-activity-page]",
+  );
   const addFriend = event.target.closest(
     "[data-add-friend]",
   );
+  const addOverviewFriend = event.target.closest(
+    "[data-add-overview-friend]",
+  );
   const unfriendButton = event.target.closest(
     "[data-unfriend]",
+  );
+  const settleFriend = event.target.closest(
+    "[data-settle-friend]",
   );
   const editExpense = event.target.closest(
     "[data-edit-expense]",
@@ -990,20 +2466,70 @@ document.addEventListener("click", (event) => {
   const deleteExpense = event.target.closest(
     "[data-delete-expense]",
   );
+  const copyInvite = event.target.closest(
+    "[data-copy-invite]",
+  );
   const editSettlement = event.target.closest(
     "[data-edit-settlement]",
   );
   const deleteSettlement = event.target.closest(
     "[data-delete-settlement]",
   );
+  if (groupEmoji)
+    return chooseGroupEmoji(groupEmoji.dataset.groupEmoji);
+  if (expenseEmoji)
+    return chooseExpenseEmoji(
+      expenseEmoji.dataset.expenseEmoji,
+    );
+  if (accountAvatarEmoji)
+    return chooseAccountAvatarEmoji(
+      accountAvatarEmoji.dataset.accountAvatarEmoji,
+    );
+  if (accountAvatarColor)
+    return chooseAccountAvatarColor(
+      accountAvatarColor.dataset.accountAvatarColor,
+    );
+  if (activityPageButton) {
+    const page = Number(
+      activityPageButton.dataset.activityPage,
+    );
+    if (
+      Number.isSafeInteger(page) &&
+      page > 0 &&
+      page !== activityPage
+    ) {
+      activityPage = page;
+      load().catch((error) => toast(error.message));
+    }
+    return;
+  }
   if (addFriend)
     return addGroupMemberAsFriend(
       Number(addFriend.dataset.addFriend),
+    );
+  if (addOverviewFriend)
+    return addOverviewPersonAsFriend(
+      Number(addOverviewFriend.dataset.addOverviewFriend),
     );
   if (unfriendButton)
     return unfriend(
       Number(unfriendButton.dataset.unfriend),
     );
+  if (settleFriend) {
+    const friend = [
+      ...(dash.friends || []),
+      ...(dash.unsettled_non_friends || []),
+    ].find(
+      (person) =>
+        person.id ===
+        Number(settleFriend.dataset.settleFriend),
+    );
+    if (friend)
+      openSettlement(null, friend).catch((error) =>
+        toast(error.message),
+      );
+    return;
+  }
   if (editExpense) {
     const entry = activeGroup?.expenses.find(
       (expense) =>
@@ -1022,7 +2548,15 @@ document.addEventListener("click", (event) => {
       deleteExpense.dataset.deleteExpense,
       "expense",
     );
+  if (copyInvite)
+    return copyInviteLink(
+      Number(copyInvite.dataset.copyInvite),
+    );
   if (editSettlement) {
+    if (!isActiveGroupOwner())
+      return toast(
+        "Only the group owner can edit settlements.",
+      );
     const entry = activeGroup?.settlements.find(
       (settlement) =>
         settlement.id ===
@@ -1104,15 +2638,18 @@ document.addEventListener("keydown", (event) => {
 
 (async () => {
   openResetFromUrl();
-  if (!token) return;
+  if (!token) {
+    showAuthenticationScreen();
+    return;
+  }
   try {
     me = (await api("/me")).user;
     updateAccountUI();
-    document.body.classList.add("is-authenticated");
-    $("#authScreen").classList.add("hidden");
     await load();
+    showSignedInApp();
     await acceptInvite();
   } catch {
     localStorage.removeItem("splito-token");
+    showAuthenticationScreen();
   }
 })();

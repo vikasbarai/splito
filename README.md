@@ -225,10 +225,13 @@ Keep the old D1 database untouched until the replacement has been confirmed. For
 Run these before committing:
 
 ```powershell
+npm test
 npm run check
 npx wrangler deploy --dry-run
 git diff --check
 ```
+
+`npm test` builds a fresh, in-memory SQLite database from every migration and exercises the Worker API without using `.wrangler`, local D1 data, Cloudflare, or email delivery. It covers sign-up/sign-in, account updates and password resets, CORS, groups and memberships, friends and invitations, all five expense split methods, receipt-size validation, settlements, owner-only editing/deleting, dashboard pagination, non-friend balances, and quote caching. Use `npm run test:api` to run that API suite explicitly.
 
 The dry run validates the Worker bundle only; it does not deploy or access production D1.
 
