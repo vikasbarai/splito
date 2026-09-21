@@ -6,9 +6,12 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "format": "prettier --write app.js worker.js server.js",
+    "check": "prettier --check api-config.js worker.js",
     "dev:worker": "wrangler dev",
+    "dev:site": "http-server . -a localhost -p 8000 -c-1",
     "deploy:worker": "wrangler deploy",
     "d1:migrate:local": "wrangler d1 migrations apply splito --local",
+    "d1:seed:local": "wrangler d1 execute splito --local --file=./scripts/seed-local.sql",
     "d1:migrate:remote": "wrangler d1 migrations apply splito --remote"
   },
   "dependencies": {
@@ -18,6 +21,7 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
+    "http-server": "^14.1.1",
     "prettier": "^3.9.7",
     "wrangler": "^4.39.0"
   }
