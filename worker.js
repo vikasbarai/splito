@@ -4,6 +4,135 @@ const id = (value) => {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : NaN;
 };
+function groupIcon(value, fallback = "✦") {
+  const source = String(value ?? "").trim();
+  if (!source) return fallback;
+  if (typeof Intl.Segmenter === "function") {
+    const [first] = new Intl.Segmenter(undefined, {
+      granularity: "grapheme",
+    }).segment(source);
+    return first?.segment || fallback;
+  }
+  return (
+    Array.from(source).slice(0, 8).join("") || fallback
+  );
+}
+function avatarImageData(value) {
+  if (value === "" || value === null || value === undefined)
+    return null;
+  if (
+    typeof value !== "string" ||
+    value.length > 180000 ||
+    !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(
+      value,
+    )
+  )
+    return undefined;
+  return value;
+}
+const maxReceiptImageBytes = 500 * 1024;
+function receiptImageData(value) {
+  if (value === "" || value === null || value === undefined)
+    return null;
+  if (
+    typeof value !== "string" ||
+    value.length >
+      4 * Math.ceil(maxReceiptImageBytes / 3) + 32
+  )
+    return undefined;
+  const match = value.match(
+    /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/,
+  );
+  if (!match) return undefined;
+  const encoded = match[1];
+  if (encoded.length % 4) return undefined;
+  const padding = encoded.endsWith("==")
+    ? 2
+    : encoded.endsWith("=")
+      ? 1
+      : 0;
+  const byteLength = (encoded.length * 3) / 4 - padding;
+  return byteLength <= maxReceiptImageBytes
+    ? value
+    : undefined;
+}
+function profileAvatarColor(value) {
+  const color = String(value || "").toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(color) ? color : null;
+}
+function positiveInteger(value, fallback, maximum) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0
+    ? Math.min(number, maximum)
+    : fallback;
+}
+const fallbackTips = [
+  {
+    quote:
+      "Small savings are just future-you sending present-you a thank-you note.",
+    author: "Splito",
+  },
+  {
+    quote:
+      "A shared bill gets much friendlier when the math does the awkward part.",
+    author: "Splito",
+  },
+  {
+    quote:
+      "Your wallet likes a plan almost as much as your group likes snacks.",
+    author: "Splito",
+  },
+  {
+    quote:
+      "Track the little costs: they are the plot twists in every budget.",
+    author: "Splito",
+  },
+];
+function randomItem(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+function zenQuote(value) {
+  const quote = String(value?.q || "").trim();
+  const author = String(value?.a || "").trim();
+  return quote && quote.length <= 280
+    ? { quote, author, source: "zenquotes" }
+    : null;
+}
+async function randomTip(request) {
+  const cacheKey = new Request(
+    new URL("/__splito-tips-cache", request.url),
+  );
+  let quotes = [];
+  try {
+    const cached = await caches.default.match(cacheKey);
+    if (cached) quotes = await cached.json();
+    if (!Array.isArray(quotes) || !quotes.length) {
+      const response = await fetch(
+        "https://zenquotes.io/api/quotes",
+      );
+      if (response.ok) {
+        quotes = (await response.json())
+          .map(zenQuote)
+          .filter(Boolean);
+        if (quotes.length)
+          await caches.default.put(
+            cacheKey,
+            new Response(JSON.stringify(quotes), {
+              headers: {
+                "cache-control": "public, max-age=3600",
+                "content-type": "application/json",
+              },
+            }),
+          );
+      }
+    }
+  } catch {
+    quotes = [];
+  }
+  return quotes.length && Math.random() < 0.65
+    ? randomItem(quotes)
+    : randomItem(fallbackTips);
+}
 
 function cors(request, env) {
   const configuredOrigin = env.FRONTEND_URL
@@ -224,11 +353,79 @@ async function member(db, groupId, userId) {
 async function friends(db, userId) {
   const rows = await db
     .prepare(
-      "SELECT u.id,u.name,u.email,f.created_at,(SELECT COUNT(*) FROM group_members mine JOIN group_members theirs ON mine.group_id=theirs.group_id WHERE mine.user_id=? AND theirs.user_id=u.id) AS shared_group_count FROM friendships f JOIN users u ON u.id=CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END WHERE f.user_id=? OR f.friend_id=? ORDER BY u.name COLLATE NOCASE",
+      "SELECT u.id,u.name,u.email,u.avatar_emoji,u.avatar_image,u.avatar_color,f.created_at,(SELECT COUNT(*) FROM group_members mine JOIN group_members theirs ON mine.group_id=theirs.group_id WHERE mine.user_id=? AND theirs.user_id=u.id) AS shared_group_count,(SELECT GROUP_CONCAT(mine.group_id) FROM group_members mine JOIN group_members theirs ON mine.group_id=theirs.group_id WHERE mine.user_id=? AND theirs.user_id=u.id) AS shared_group_ids FROM friendships f JOIN users u ON u.id=CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END WHERE f.user_id=? OR f.friend_id=? ORDER BY u.name COLLATE NOCASE",
+    )
+    .bind(userId, userId, userId, userId, userId)
+    .all();
+  return rows.results;
+}
+async function unsettledNonFriends(db, userId) {
+  const rows = await db
+    .prepare(
+      "SELECT u.id,u.name,u.email,u.avatar_emoji,u.avatar_image,u.avatar_color,COUNT(DISTINCT theirs.group_id) AS shared_group_count,GROUP_CONCAT(DISTINCT theirs.group_id) AS shared_group_ids FROM users u JOIN group_members theirs ON theirs.user_id=u.id JOIN group_members mine ON mine.group_id=theirs.group_id AND mine.user_id=? WHERE u.id<>? AND NOT EXISTS(SELECT 1 FROM friendships f WHERE (f.user_id=? AND f.friend_id=u.id) OR (f.user_id=u.id AND f.friend_id=?)) GROUP BY u.id,u.name,u.email,u.avatar_emoji,u.avatar_image,u.avatar_color ORDER BY u.name COLLATE NOCASE",
     )
     .bind(userId, userId, userId, userId)
     .all();
   return rows.results;
+}
+async function friendBalances(db, userId, friendIds) {
+  const result = new Map(
+    friendIds.map((friendId) => [friendId, 0]),
+  );
+  if (!result.size) return result;
+  const expenseSplits = await db
+    .prepare(
+      "SELECT e.paid_by,s.user_id,s.amount_cents FROM expenses e JOIN expense_splits s ON s.expense_id=e.id JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=?",
+    )
+    .bind(userId)
+    .all();
+  for (const split of expenseSplits.results) {
+    if (
+      split.paid_by === userId &&
+      split.user_id !== userId &&
+      result.has(split.user_id)
+    )
+      result.set(
+        split.user_id,
+        result.get(split.user_id) + split.amount_cents,
+      );
+    else if (
+      split.user_id === userId &&
+      split.paid_by !== userId &&
+      result.has(split.paid_by)
+    )
+      result.set(
+        split.paid_by,
+        result.get(split.paid_by) - split.amount_cents,
+      );
+  }
+  const settlements = await db
+    .prepare(
+      "SELECT s.paid_by,s.paid_to,s.amount_cents FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id AND mine.user_id=?",
+    )
+    .bind(userId)
+    .all();
+  for (const settlement of settlements.results) {
+    if (
+      settlement.paid_by === userId &&
+      result.has(settlement.paid_to)
+    )
+      result.set(
+        settlement.paid_to,
+        result.get(settlement.paid_to) +
+          settlement.amount_cents,
+      );
+    else if (
+      settlement.paid_to === userId &&
+      result.has(settlement.paid_by)
+    )
+      result.set(
+        settlement.paid_by,
+        result.get(settlement.paid_by) -
+          settlement.amount_cents,
+      );
+  }
+  return result;
 }
 function friendshipPair(firstUserId, secondUserId) {
   return firstUserId < secondUserId
@@ -256,7 +453,7 @@ async function addFriendship(
 async function balances(db, groupId) {
   const people = await db
     .prepare(
-      "SELECT u.id,u.name,u.email FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=?",
+      "SELECT u.id,u.name,u.email,u.avatar_emoji,u.avatar_image,u.avatar_color FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=?",
     )
     .bind(groupId)
     .all();
@@ -307,9 +504,204 @@ async function ensureGroup(db, groupId, userId) {
   )
     throw new Error("GROUP_NOT_FOUND");
 }
+async function ensureGroupOwner(db, groupId, userId) {
+  const group = await db
+    .prepare("SELECT created_by FROM groups WHERE id=?")
+    .bind(groupId)
+    .first();
+  if (!group) throw new Error("GROUP_NOT_FOUND");
+  if (group.created_by !== userId)
+    throw new Error("GROUP_OWNER_REQUIRED");
+  return group;
+}
 function validDate(value, fallback) {
   const date = value || fallback;
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+}
+function equalSplits(cents, participants) {
+  const each = Math.floor(cents / participants.length);
+  const remainder = cents % participants.length;
+  return participants.map((userId, index) => ({
+    userId,
+    cents: each + (index < remainder ? 1 : 0),
+  }));
+}
+function centsFromValue(value, allowNegative = false) {
+  if (
+    value === null ||
+    value === undefined ||
+    String(value).trim() === ""
+  )
+    return null;
+  const cents = Math.round(Number(value) * 100);
+  if (
+    !Number.isSafeInteger(cents) ||
+    (!allowNegative && cents < 0)
+  )
+    return null;
+  return cents;
+}
+function proportionalSplits(cents, participants, values) {
+  const total = values.reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const splits = participants.map((userId, index) => {
+    const raw = cents * (values[index] / total);
+    return {
+      userId,
+      cents: Math.floor(raw),
+      remainder: raw - Math.floor(raw),
+    };
+  });
+  let remainder =
+    cents -
+    splits.reduce((sum, split) => sum + split.cents, 0);
+  [...splits]
+    .sort((left, right) => right.remainder - left.remainder)
+    .forEach((split) => {
+      if (remainder > 0) {
+        split.cents += 1;
+        remainder -= 1;
+      }
+    });
+  return splits.map(({ userId, cents: splitCents }) => ({
+    userId,
+    cents: splitCents,
+  }));
+}
+function customSplitValues(participants, rawSplits) {
+  if (!Array.isArray(rawSplits)) return null;
+  const values = new Map();
+  for (const split of rawSplits) {
+    const userId = id(split?.userId);
+    if (
+      !participants.includes(userId) ||
+      values.has(userId)
+    )
+      return null;
+    values.set(userId, split.value);
+  }
+  if (values.size !== participants.length) return null;
+  return participants.map((userId) => values.get(userId));
+}
+function normalizeSplitMethod(value) {
+  return [
+    "equal",
+    "exact",
+    "percentage",
+    "shares",
+    "adjustment",
+  ].includes(value)
+    ? value
+    : "equal";
+}
+function expenseSplits(
+  cents,
+  participants,
+  mode,
+  rawSplits,
+) {
+  const splitMode = normalizeSplitMethod(mode);
+  if (splitMode === "equal")
+    return { splits: equalSplits(cents, participants) };
+  const values = customSplitValues(participants, rawSplits);
+  if (!values)
+    return {
+      error:
+        "Enter a split value for every selected group member.",
+    };
+  if (splitMode === "exact") {
+    const splitCents = values.map((value) =>
+      centsFromValue(value),
+    );
+    if (
+      splitCents.some((value) => value === null) ||
+      splitCents.reduce((sum, value) => sum + value, 0) !==
+        cents
+    )
+      return {
+        error:
+          "Exact split amounts must add up to the expense total.",
+      };
+    return {
+      splits: participants.map((userId, index) => ({
+        userId,
+        cents: splitCents[index],
+      })),
+    };
+  }
+  if (splitMode === "percentage") {
+    const percentages = values.map(Number);
+    const total = percentages.reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    if (
+      percentages.some(
+        (value, index) =>
+          String(values[index]).trim() === "" ||
+          !Number.isFinite(value) ||
+          value < 0,
+      ) ||
+      Math.abs(total - 100) > 0.000001
+    )
+      return {
+        error: "Split percentages must add up to 100%.",
+      };
+    return {
+      splits: proportionalSplits(
+        cents,
+        participants,
+        percentages,
+      ),
+    };
+  }
+  if (splitMode === "shares") {
+    const shares = values.map(Number);
+    if (
+      shares.some(
+        (value, index) =>
+          String(values[index]).trim() === "" ||
+          !Number.isFinite(value) ||
+          value <= 0,
+      )
+    )
+      return {
+        error:
+          "Each selected member needs a positive number of shares.",
+      };
+    return {
+      splits: proportionalSplits(
+        cents,
+        participants,
+        shares,
+      ),
+    };
+  }
+  const adjustments = values.map((value) =>
+    centsFromValue(value, true),
+  );
+  if (
+    adjustments.some((value) => value === null) ||
+    adjustments.reduce((sum, value) => sum + value, 0) !== 0
+  )
+    return {
+      error: "Split adjustments must add up to \u20b90.00.",
+    };
+  const splits = equalSplits(cents, participants).map(
+    (split, index) => ({
+      ...split,
+      cents: split.cents + adjustments[index],
+    }),
+  );
+  if (splits.some((split) => split.cents < 0))
+    return {
+      error:
+        "An adjustment cannot make a member's share negative.",
+    };
+  return { splits };
 }
 async function expenseInput(db, groupId, data) {
   const cents = Math.round(Number(data.amount) * 100),
@@ -327,7 +719,13 @@ async function expenseInput(db, groupId, data) {
     notes =
       String(data.notes || "")
         .trim()
-        .slice(0, 1000) || null;
+        .slice(0, 1000) || null,
+    receiptImage = receiptImageData(data.receiptImage);
+  if (receiptImage === undefined)
+    return {
+      error:
+        "Receipt must be a compressed JPEG image no larger than 500 KB.",
+    };
   if (
     !data.description?.trim() ||
     !Number.isSafeInteger(cents) ||
@@ -355,36 +753,35 @@ async function expenseInput(db, groupId, data) {
     return {
       error: "Choose valid group members and payer.",
     };
+  const calculated = expenseSplits(
+    cents,
+    participants,
+    data.splitMode,
+    data.splits,
+  );
+  if (calculated.error) return calculated;
   return {
     expense: {
       description: data.description.trim().slice(0, 200),
+      emoji: groupIcon(data.emoji, ""),
       cents,
       paidBy,
       category: category || "other",
       date,
       notes,
+      receiptImage,
     },
-    participants,
+    splitMethod: normalizeSplitMethod(data.splitMode),
+    splits: calculated.splits,
   };
 }
-function splitStatements(
-  db,
-  expenseId,
-  cents,
-  participants,
-) {
-  const each = Math.floor(cents / participants.length),
-    remainder = cents % participants.length;
-  return participants.map((person, index) =>
+function splitStatements(db, expenseId, splits) {
+  return splits.map((split) =>
     db
       .prepare(
         "INSERT INTO expense_splits(expense_id,user_id,amount_cents) VALUES(?,?,?)",
       )
-      .bind(
-        expenseId,
-        person,
-        each + (index < remainder ? 1 : 0),
-      ),
+      .bind(expenseId, split.userId, split.cents),
   );
 }
 async function settlementInput(
@@ -399,7 +796,13 @@ async function settlementInput(
     settledAt = validDate(
       data.settledAt,
       new Date().toISOString().slice(0, 10),
-    );
+    ),
+    receiptImage = receiptImageData(data.receiptImage);
+  if (receiptImage === undefined)
+    return {
+      error:
+        "Receipt must be a compressed JPEG image no larger than 500 KB.",
+    };
   if (
     !Number.isSafeInteger(cents) ||
     cents < 1 ||
@@ -415,7 +818,13 @@ async function settlementInput(
         "Choose different group members, a valid amount, and date.",
     };
   return {
-    settlement: { cents, paidBy, paidTo, settledAt },
+    settlement: {
+      cents,
+      paidBy,
+      paidTo,
+      settledAt,
+      receiptImage,
+    },
   };
 }
 
@@ -425,10 +834,8 @@ export default {
       return new Response(null, {
         headers: cors(request, env),
       });
-    const path = new URL(request.url).pathname.replace(
-        /^\/api/,
-        "",
-      ),
+    const url = new URL(request.url),
+      path = url.pathname.replace(/^\/api/, ""),
       parts = path.split("/").filter(Boolean),
       db = env.DB;
     try {
@@ -472,6 +879,9 @@ export default {
           ).meta.last_row_id,
           name: name.trim(),
           email: email.toLowerCase().trim(),
+          avatar_emoji: null,
+          avatar_image: null,
+          avatar_color: null,
         };
         return json(
           request,
@@ -509,6 +919,9 @@ export default {
           id: row.id,
           name: row.name,
           email: row.email,
+          avatar_emoji: row.avatar_emoji,
+          avatar_image: row.avatar_image,
+          avatar_color: row.avatar_color,
           auth_version: row.auth_version || 0,
         };
         return json(request, env, {
@@ -516,6 +929,9 @@ export default {
             id: user.id,
             name: user.name,
             email: user.email,
+            avatar_emoji: user.avatar_emoji,
+            avatar_image: user.avatar_image,
+            avatar_color: user.avatar_color,
           },
           token: await signToken(user, env.JWT_SECRET),
         });
@@ -527,9 +943,14 @@ export default {
         const { email } = await request.json(),
           cleanEmail = email?.toLowerCase().trim(),
           message =
-            "If an account matches that email, a reset link has been sent.";
+            "Check your inbox for a password-reset email.";
         if (!cleanEmail?.includes("@"))
-          return json(request, env, { message });
+          return json(
+            request,
+            env,
+            { error: "Enter a valid email address." },
+            400,
+          );
         const account = await db
           .prepare(
             "SELECT id,email FROM users WHERE email=?",
@@ -537,7 +958,15 @@ export default {
           .bind(cleanEmail)
           .first();
         if (!account)
-          return json(request, env, { message });
+          return json(
+            request,
+            env,
+            {
+              error:
+                "No Splito account exists for this email address. Check the email or create an account.",
+            },
+            404,
+          );
         const token = createResetToken(),
           resetUrl = `${(env.FRONTEND_URL || new URL(request.url).origin).replace(/\/$/, "")}/?reset=${encodeURIComponent(token)}`;
         await db.batch([
@@ -663,11 +1092,15 @@ export default {
           { error: "Please sign in." },
           401,
         );
+      if (request.method === "GET" && path === "/tip")
+        return json(request, env, {
+          tip: await randomTip(request),
+        });
       if (request.method === "GET" && path === "/me")
         return json(request, env, {
           user: await db
             .prepare(
-              "SELECT id,name,email FROM users WHERE id=?",
+              "SELECT id,name,email,avatar_emoji,avatar_image,avatar_color FROM users WHERE id=?",
             )
             .bind(user.id)
             .first(),
@@ -681,7 +1114,22 @@ export default {
           name = data.name?.trim().slice(0, 100),
           email = data.email?.toLowerCase().trim(),
           currentPassword = data.currentPassword || "",
-          newPassword = data.newPassword || "";
+          newPassword = data.newPassword || "",
+          avatarEmoji = groupIcon(data.avatarEmoji, ""),
+          avatarImage =
+            Object.prototype.hasOwnProperty.call(
+              data,
+              "avatarImage",
+            )
+              ? avatarImageData(data.avatarImage)
+              : current?.avatar_image,
+          avatarColor =
+            Object.prototype.hasOwnProperty.call(
+              data,
+              "avatarColor",
+            )
+              ? profileAvatarColor(data.avatarColor)
+              : current?.avatar_color;
         if (!current)
           return json(
             request,
@@ -696,6 +1144,16 @@ export default {
             {
               error:
                 "Enter a name and valid email address.",
+            },
+            400,
+          );
+        if (avatarImage === undefined)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "Choose a JPG, PNG, or WebP profile image under 180 KB.",
             },
             400,
           );
@@ -732,17 +1190,23 @@ export default {
           id: current.id,
           name,
           email,
+          avatar_emoji: avatarEmoji || null,
+          avatar_image: avatarImage,
+          avatar_color: avatarColor,
           auth_version:
             current.auth_version +
             (protectedChange ? 1 : 0),
         };
         await db
           .prepare(
-            "UPDATE users SET name=?,email=?,password_hash=?,auth_version=auth_version+? WHERE id=?",
+            "UPDATE users SET name=?,email=?,avatar_emoji=?,avatar_image=?,avatar_color=?,password_hash=?,auth_version=auth_version+? WHERE id=?",
           )
           .bind(
             name,
             email,
+            updatedUser.avatar_emoji,
+            updatedUser.avatar_image,
+            updatedUser.avatar_color,
             newPassword
               ? await passwordHash(newPassword)
               : current.password_hash,
@@ -755,6 +1219,9 @@ export default {
             id: updatedUser.id,
             name: updatedUser.name,
             email: updatedUser.email,
+            avatar_emoji: updatedUser.avatar_emoji,
+            avatar_image: updatedUser.avatar_image,
+            avatar_color: updatedUser.avatar_color,
           },
           token: await signToken(
             updatedUser,
@@ -766,6 +1233,16 @@ export default {
         request.method === "GET" &&
         path === "/dashboard"
       ) {
+        const activityPageSize = positiveInteger(
+          url.searchParams.get("activityPageSize"),
+          8,
+          25,
+        );
+        const requestedActivityPage = positiveInteger(
+          url.searchParams.get("activityPage"),
+          1,
+          100000,
+        );
         const groups = await db
           .prepare(
             "SELECT g.*,(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=g.id) member_count FROM groups g JOIN group_members mine ON mine.group_id=g.id WHERE mine.user_id=? ORDER BY g.created_at DESC",
@@ -774,16 +1251,69 @@ export default {
           .all();
         for (const group of groups.results)
           group.balances = await balances(db, group.id);
-        const activity = await db
+        const activityCount = await db
           .prepare(
-            "SELECT e.id,e.group_id,e.description,e.amount_cents,e.category,e.expense_date AS activity_date,e.created_at,g.name AS group_name,u.name AS payer_name,'expense' AS entry_type FROM expenses e JOIN groups g ON g.id=e.group_id JOIN users u ON u.id=e.paid_by JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? UNION ALL SELECT s.id,s.group_id,'Settlement' AS description,s.amount_cents,'settlement' AS category,substr(s.settled_at,1,10) AS activity_date,s.settled_at AS created_at,g.name AS group_name,a.name || ' paid ' || b.name AS payer_name,'settlement' AS entry_type FROM settlements s JOIN groups g ON g.id=s.group_id JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? ORDER BY created_at DESC LIMIT 20",
+            "SELECT (SELECT COUNT(*) FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id WHERE mine.user_id=?) + (SELECT COUNT(*) FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id WHERE mine.user_id=?) AS total",
           )
           .bind(user.id, user.id)
+          .first();
+        const activityTotal =
+          Number(activityCount?.total) || 0;
+        const activityTotalPages = Math.max(
+          1,
+          Math.ceil(activityTotal / activityPageSize),
+        );
+        const activityPage = Math.min(
+          requestedActivityPage,
+          activityTotalPages,
+        );
+        const activity = await db
+          .prepare(
+            "SELECT e.id,e.group_id,e.description,e.emoji,e.receipt_image,e.amount_cents,e.category,e.expense_date AS activity_date,e.created_at,g.name AS group_name,u.name AS payer_name,'expense' AS entry_type FROM expenses e JOIN groups g ON g.id=e.group_id JOIN users u ON u.id=e.paid_by JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? UNION ALL SELECT s.id,s.group_id,'Settlement' AS description,NULL AS emoji,s.receipt_image,s.amount_cents,'settlement' AS category,substr(s.settled_at,1,10) AS activity_date,s.settled_at AS created_at,g.name AS group_name,a.name || ' paid ' || b.name AS payer_name,'settlement' AS entry_type FROM settlements s JOIN groups g ON g.id=s.group_id JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+          )
+          .bind(
+            user.id,
+            user.id,
+            activityPageSize,
+            (activityPage - 1) * activityPageSize,
+          )
           .all();
+        const friendList = await friends(db, user.id);
+        const directBalances = await friendBalances(
+          db,
+          user.id,
+          friendList.map((friend) => friend.id),
+        );
+        for (const friend of friendList)
+          friend.balance_cents =
+            directBalances.get(friend.id) || 0;
+        const nonFriendList = await unsettledNonFriends(
+          db,
+          user.id,
+        );
+        const nonFriendBalances = await friendBalances(
+          db,
+          user.id,
+          nonFriendList.map((person) => person.id),
+        );
+        const unsettledNonFriendList = nonFriendList
+          .map((person) => ({
+            ...person,
+            balance_cents:
+              nonFriendBalances.get(person.id) || 0,
+          }))
+          .filter((person) => person.balance_cents !== 0);
         return json(request, env, {
           groups: groups.results,
           activity: activity.results,
-          friends: await friends(db, user.id),
+          activityPagination: {
+            page: activityPage,
+            pageSize: activityPageSize,
+            total: activityTotal,
+            totalPages: activityTotalPages,
+          },
+          friends: friendList,
+          unsettled_non_friends: unsettledNonFriendList,
         });
       }
       if (
@@ -888,7 +1418,7 @@ export default {
             .prepare(
               "INSERT INTO groups(name,emoji,created_by) VALUES(?,?,?)",
             )
-            .bind(name.trim(), emoji.slice(0, 4), user.id)
+            .bind(name.trim(), groupIcon(emoji), user.id)
             .run()
         ).meta.last_row_id;
         await db
@@ -905,8 +1435,8 @@ export default {
         request.method === "PUT"
       ) {
         const groupId = id(parts[1]);
-        await ensureGroup(db, groupId, user.id);
-        const { name, emoji = "*" } = await request.json();
+        await ensureGroupOwner(db, groupId, user.id);
+        const { name, emoji = "✦" } = await request.json();
         if (!name?.trim())
           return json(
             request,
@@ -920,11 +1450,51 @@ export default {
           )
           .bind(
             name.trim().slice(0, 100),
-            String(emoji).slice(0, 4),
+            groupIcon(emoji),
             groupId,
           )
           .run();
         return json(request, env, { id: groupId });
+      }
+      if (
+        parts[0] === "groups" &&
+        parts.length === 2 &&
+        request.method === "DELETE"
+      ) {
+        const groupId = id(parts[1]);
+        await ensureGroupOwner(db, groupId, user.id);
+        await db.batch([
+          db
+            .prepare(
+              "DELETE FROM expense_splits WHERE expense_id IN (SELECT id FROM expenses WHERE group_id=?)",
+            )
+            .bind(groupId),
+          db
+            .prepare(
+              "DELETE FROM expenses WHERE group_id=?",
+            )
+            .bind(groupId),
+          db
+            .prepare(
+              "DELETE FROM settlements WHERE group_id=?",
+            )
+            .bind(groupId),
+          db
+            .prepare("DELETE FROM invites WHERE group_id=?")
+            .bind(groupId),
+          db
+            .prepare(
+              "DELETE FROM group_members WHERE group_id=?",
+            )
+            .bind(groupId),
+          db
+            .prepare("DELETE FROM groups WHERE id=?")
+            .bind(groupId),
+        ]);
+        return new Response(null, {
+          status: 204,
+          headers: cors(request, env),
+        });
       }
       if (
         parts[0] === "groups" &&
@@ -934,12 +1504,14 @@ export default {
         const groupId = id(parts[1]);
         await ensureGroup(db, groupId, user.id);
         const group = await db
-            .prepare("SELECT * FROM groups WHERE id=?")
+            .prepare(
+              "SELECT g.*,u.name AS owner_name FROM groups g JOIN users u ON u.id=g.created_by WHERE g.id=?",
+            )
             .bind(groupId)
             .first(),
           members = await db
             .prepare(
-              "SELECT u.id,u.name,u.email FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=?",
+              "SELECT u.id,u.name,u.email,u.avatar_emoji,u.avatar_image,u.avatar_color FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=?",
             )
             .bind(groupId)
             .all(),
@@ -1054,6 +1626,46 @@ export default {
       }
       if (
         parts[0] === "groups" &&
+        parts.length === 5 &&
+        parts[2] === "invites" &&
+        parts[4] === "link" &&
+        request.method === "GET"
+      ) {
+        const groupId = id(parts[1]);
+        const inviteId = id(parts[3]);
+        await ensureGroup(db, groupId, user.id);
+        const invite = await db
+          .prepare(
+            "SELECT token,accepted_at FROM invites WHERE id=? AND group_id=?",
+          )
+          .bind(inviteId, groupId)
+          .first();
+        if (!invite)
+          return json(
+            request,
+            env,
+            { error: "Invitation not found." },
+            404,
+          );
+        if (invite.accepted_at)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "This invitation has already been accepted.",
+            },
+            409,
+          );
+        const frontendUrl = (
+          env.FRONTEND_URL || new URL(request.url).origin
+        ).replace(/\/$/, "");
+        return json(request, env, {
+          inviteUrl: `${frontendUrl}/?invite=${invite.token}`,
+        });
+      }
+      if (
+        parts[0] === "groups" &&
         parts[2] === "invites" &&
         request.method === "POST"
       ) {
@@ -1086,7 +1698,7 @@ export default {
             addToFriends ? 1 : 0,
           )
           .run();
-        const inviteUrl = `${env.FRONTEND_URL || new URL(request.url).origin}/?invite=${invite}`;
+        const inviteUrl = `${(env.FRONTEND_URL || new URL(request.url).origin).replace(/\/$/, "")}/?invite=${invite}`;
         const emailSent = await sendGroupInviteEmail(
           env,
           cleanEmail,
@@ -1206,30 +1818,28 @@ export default {
             { error: input.error },
             400,
           );
-        const { expense, participants } = input;
+        const { expense, splitMethod, splits } = input;
         const expenseId = (
           await db
             .prepare(
-              "INSERT INTO expenses(group_id,description,amount_cents,paid_by,category,expense_date,notes) VALUES(?,?,?,?,?,?,?)",
+              "INSERT INTO expenses(group_id,description,emoji,split_method,amount_cents,paid_by,category,expense_date,notes,receipt_image) VALUES(?,?,?,?,?,?,?,?,?,?)",
             )
             .bind(
               groupId,
               expense.description,
+              expense.emoji,
+              splitMethod,
               expense.cents,
               expense.paidBy,
               expense.category,
               expense.date,
               expense.notes,
+              expense.receiptImage,
             )
             .run()
         ).meta.last_row_id;
         await db.batch(
-          splitStatements(
-            db,
-            expenseId,
-            expense.cents,
-            participants,
-          ),
+          splitStatements(db, expenseId, splits),
         );
         return json(request, env, { id: expenseId }, 201);
       }
@@ -1243,16 +1853,18 @@ export default {
           .prepare("SELECT * FROM expenses WHERE id=?")
           .bind(expenseId)
           .first();
-        if (
-          !existing ||
-          !(await member(db, existing.group_id, user.id))
-        )
+        if (!existing)
           return json(
             request,
             env,
             { error: "Expense not found." },
             404,
           );
+        await ensureGroupOwner(
+          db,
+          existing.group_id,
+          user.id,
+        );
         const input = await expenseInput(
           db,
           existing.group_id,
@@ -1265,19 +1877,22 @@ export default {
             { error: input.error },
             400,
           );
-        const { expense, participants } = input;
+        const { expense, splitMethod, splits } = input;
         await db.batch([
           db
             .prepare(
-              "UPDATE expenses SET description=?,amount_cents=?,paid_by=?,category=?,expense_date=?,notes=? WHERE id=?",
+              "UPDATE expenses SET description=?,emoji=?,split_method=?,amount_cents=?,paid_by=?,category=?,expense_date=?,notes=?,receipt_image=? WHERE id=?",
             )
             .bind(
               expense.description,
+              expense.emoji,
+              splitMethod,
               expense.cents,
               expense.paidBy,
               expense.category,
               expense.date,
               expense.notes,
+              expense.receiptImage,
               expenseId,
             ),
           db
@@ -1285,12 +1900,7 @@ export default {
               "DELETE FROM expense_splits WHERE expense_id=?",
             )
             .bind(expenseId),
-          ...splitStatements(
-            db,
-            expenseId,
-            expense.cents,
-            participants,
-          ),
+          ...splitStatements(db, expenseId, splits),
         ]);
         return json(request, env, { id: expenseId });
       }
@@ -1302,16 +1912,18 @@ export default {
           .prepare("SELECT * FROM expenses WHERE id=?")
           .bind(id(parts[1]))
           .first();
-        if (
-          !expense ||
-          !(await member(db, expense.group_id, user.id))
-        )
+        if (!expense)
           return json(
             request,
             env,
             { error: "Expense not found." },
             404,
           );
+        await ensureGroupOwner(
+          db,
+          expense.group_id,
+          user.id,
+        );
         await db
           .prepare("DELETE FROM expenses WHERE id=?")
           .bind(expense.id)
@@ -1344,7 +1956,7 @@ export default {
         const { settlement } = input;
         await db
           .prepare(
-            "INSERT INTO settlements(group_id,paid_by,paid_to,amount_cents,settled_at) VALUES(?,?,?,?,?)",
+            "INSERT INTO settlements(group_id,paid_by,paid_to,amount_cents,settled_at,receipt_image) VALUES(?,?,?,?,?,?)",
           )
           .bind(
             groupId,
@@ -1352,6 +1964,7 @@ export default {
             settlement.paidTo,
             settlement.cents,
             settlement.settledAt,
+            settlement.receiptImage,
           )
           .run();
         return json(request, env, { ok: true }, 201);
@@ -1376,6 +1989,11 @@ export default {
             { error: "Settlement not found." },
             404,
           );
+        await ensureGroupOwner(
+          db,
+          existing.group_id,
+          user.id,
+        );
         const input = await settlementInput(
           db,
           existing.group_id,
@@ -1392,13 +2010,14 @@ export default {
         const { settlement } = input;
         await db
           .prepare(
-            "UPDATE settlements SET paid_by=?,paid_to=?,amount_cents=?,settled_at=? WHERE id=?",
+            "UPDATE settlements SET paid_by=?,paid_to=?,amount_cents=?,settled_at=?,receipt_image=? WHERE id=?",
           )
           .bind(
             settlement.paidBy,
             settlement.paidTo,
             settlement.cents,
             settlement.settledAt,
+            settlement.receiptImage,
             settlementId,
           )
           .run();
@@ -1423,6 +2042,11 @@ export default {
             { error: "Settlement not found." },
             404,
           );
+        await ensureGroupOwner(
+          db,
+          settlement.group_id,
+          user.id,
+        );
         await db
           .prepare("DELETE FROM settlements WHERE id=?")
           .bind(settlement.id)
@@ -1446,6 +2070,16 @@ export default {
           env,
           { error: "Group not found." },
           404,
+        );
+      if (error.message === "GROUP_OWNER_REQUIRED")
+        return json(
+          request,
+          env,
+          {
+            error:
+              "Only the group owner can edit or delete this group, its expenses, and its settlements.",
+          },
+          403,
         );
       if (String(error).includes("UNIQUE"))
         return json(
