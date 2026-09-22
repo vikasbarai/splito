@@ -2705,11 +2705,6 @@ function dismissFromPointer(event) {
   }
 }
 document.addEventListener(
-  "pointerdown",
-  dismissFromPointer,
-  true,
-);
-document.addEventListener(
   "click",
   dismissFromPointer,
   true,
