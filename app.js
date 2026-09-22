@@ -16,6 +16,7 @@ let activityPage = 1;
 let tipRequest = 0;
 const defaultAvatarColor = "#d76e47";
 const maxReceiptImageBytes = 500 * 1024;
+const apiTimeoutMs = 20000;
 
 const money = (cents) =>
   new Intl.NumberFormat("en-IN", {
@@ -137,18 +138,37 @@ async function api(url, options = {}) {
     throw Error(
       "This site has not been configured with its API URL.",
     );
-  const response = await fetch(`${base}/api${url}`, {
-    ...options,
-    headers: {
-      ...(options.body
-        ? { "Content-Type": "application/json" }
-        : {}),
-      ...(token
-        ? { Authorization: `Bearer ${token}` }
-        : {}),
-      ...(options.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    apiTimeoutMs,
+  );
+  let response;
+  try {
+    response = await fetch(`${base}/api${url}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...(options.body
+          ? { "Content-Type": "application/json" }
+          : {}),
+        ...(token
+          ? { Authorization: `Bearer ${token}` }
+          : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error.name === "AbortError")
+      throw Error(
+        "The Splito API did not respond. Check whether api.squarelab.in is reachable on this device or network.",
+      );
+    throw Error(
+      "Could not reach the Splito API. Check your connection or try another network.",
+    );
+  } finally {
+    window.clearTimeout(timeout);
+  }
   if (response.status === 204) return undefined;
   const raw = await response.text();
   let body = {};
@@ -2009,27 +2029,35 @@ if (forgotPasswordButton) {
 $("#authForm").onsubmit = async (event) => {
   event.preventDefault();
   const submittedMode = mode;
+  const form = event.currentTarget;
+  const previousToken = token;
+  const previousUser = me;
+  const submitButton = $("#authSubmit");
+  submitButton.disabled = true;
+  $("#authError").textContent = "";
   try {
     const result = await api(`/auth/${submittedMode}`, {
       method: "POST",
       body: JSON.stringify(
-        Object.fromEntries(
-          new FormData(event.currentTarget),
-        ),
+        Object.fromEntries(new FormData(form)),
       ),
     });
     token = result.token;
     me = result.user;
-    localStorage.setItem("splito-token", token);
     updateAccountUI();
     await load();
+    localStorage.setItem("splito-token", token);
     showSignedInApp();
     if (submittedMode === "register" && result.message) {
       toast(result.message);
     }
     await acceptInvite();
   } catch (error) {
+    token = previousToken;
+    me = previousUser;
     $("#authError").textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
   }
 };
 
