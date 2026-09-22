@@ -132,6 +132,22 @@ async function register(
   return result.body;
 }
 
+async function verifyEmail(env, account) {
+  const verificationToken = new URL(
+    account.debugVerificationUrl,
+  ).searchParams.get("verify");
+  assert.ok(
+    verificationToken,
+    "local registration returns a usable email-verification token",
+  );
+  const result = await call(env, "/auth/verify-email", {
+    method: "POST",
+    body: { token: verificationToken },
+  });
+  assert.equal(result.status, 200, result.body?.error);
+  return result.body;
+}
+
 function splitValues(participants, values) {
   return participants.map((userId, index) => ({
     userId,
@@ -193,8 +209,46 @@ test("authentication, account settings, password reset, and CORS", async () => {
       "Alice",
       "alice@example.test",
     );
+    assert.equal(account.user.email_verified_at, null);
     const noSession = await call(env, "/me");
     assert.equal(noSession.status, 401);
+
+    const resentVerification = await call(
+      env,
+      "/auth/resend-verification",
+      { method: "POST", token: account.token },
+    );
+    assert.equal(
+      resentVerification.status,
+      200,
+      resentVerification.body?.error,
+    );
+    const originalVerificationToken = new URL(
+      account.debugVerificationUrl,
+    ).searchParams.get("verify");
+    const expiredOriginalVerification = await call(
+      env,
+      "/auth/verify-email",
+      {
+        method: "POST",
+        body: { token: originalVerificationToken },
+      },
+    );
+    assert.equal(expiredOriginalVerification.status, 400);
+
+    const verified = await verifyEmail(env, {
+      ...account,
+      debugVerificationUrl:
+        resentVerification.body.debugVerificationUrl,
+    });
+    assert.equal(
+      verified.message,
+      "Your email address has been verified.",
+    );
+    const verifiedAccount = await call(env, "/me", {
+      token: account.token,
+    });
+    assert.ok(verifiedAccount.body.user.email_verified_at);
 
     const profile = await call(env, "/me", {
       method: "PUT",
@@ -229,7 +283,15 @@ test("authentication, account settings, password reset, and CORS", async () => {
         body: { email: "missing@example.test" },
       },
     );
-    assert.equal(unknownAccount.status, 404);
+    assert.equal(unknownAccount.status, 200);
+    assert.equal(
+      unknownAccount.body.message,
+      "If an account exists for this email, a password-reset link will be sent.",
+    );
+    assert.equal(
+      unknownAccount.body.debugResetUrl,
+      undefined,
+    );
 
     const forgotten = await call(
       env,
@@ -243,6 +305,10 @@ test("authentication, account settings, password reset, and CORS", async () => {
       forgotten.status,
       200,
       forgotten.body?.error,
+    );
+    assert.equal(
+      forgotten.body.message,
+      unknownAccount.body.message,
     );
     const resetToken = new URL(
       forgotten.body.debugResetUrl,
@@ -353,6 +419,43 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
       addMember.body?.error,
     );
 
+    const unverifiedInvite = await call(
+      env,
+      `/groups/${groupId}/invites`,
+      {
+        method: "POST",
+        token: owner.token,
+        body: { email: "pending@example.test" },
+      },
+    );
+    assert.equal(unverifiedInvite.status, 403);
+    await verifyEmail(env, owner);
+
+    const pendingInvite = await call(
+      env,
+      `/groups/${groupId}/invites`,
+      {
+        method: "POST",
+        token: owner.token,
+        body: { email: "pending@example.test" },
+      },
+    );
+    assert.equal(
+      pendingInvite.status,
+      201,
+      pendingInvite.body?.error,
+    );
+    const repeatedPendingInvite = await call(
+      env,
+      `/groups/${groupId}/invites`,
+      {
+        method: "POST",
+        token: owner.token,
+        body: { email: "pending@example.test" },
+      },
+    );
+    assert.equal(repeatedPendingInvite.status, 409);
+
     for (const [person, addToFriends] of [
       [invitedFriend, true],
       [nonFriend, false],
@@ -401,6 +504,65 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
         accepted.body?.error,
       );
     }
+
+    const existingMemberInvite = await call(
+      env,
+      `/groups/${groupId}/invites`,
+      {
+        method: "POST",
+        token: owner.token,
+        body: { email: friend.user.email },
+      },
+    );
+    assert.equal(existingMemberInvite.status, 409);
+
+    for (let number = 1; number <= 7; number += 1) {
+      const invite = await call(
+        env,
+        `/groups/${groupId}/invites`,
+        {
+          method: "POST",
+          token: owner.token,
+          body: { email: `bulk-${number}@example.test` },
+        },
+      );
+      assert.equal(invite.status, 201, invite.body?.error);
+    }
+    const inviteLimit = await call(
+      env,
+      `/groups/${groupId}/invites`,
+      {
+        method: "POST",
+        token: owner.token,
+        body: { email: "over-invite-limit@example.test" },
+      },
+    );
+    assert.equal(inviteLimit.status, 429);
+
+    await verifyEmail(env, friend);
+    for (let number = 1; number <= 10; number += 1) {
+      database
+        .prepare(
+          "INSERT INTO invites(group_id,email,token,invited_by,add_to_friends) VALUES(?,?,?,?,?)",
+        )
+        .run(
+          groupId,
+          "recipient-limit@example.test",
+          `recipient-limit-token-${number}`,
+          nonFriend.user.id,
+          0,
+        );
+    }
+    const recipientLimit = await call(
+      env,
+      `/groups/${groupId}/invites`,
+      {
+        method: "POST",
+        token: friend.token,
+        body: { email: "recipient-limit@example.test" },
+      },
+    );
+    assert.equal(recipientLimit.status, 429);
 
     const nonOwnerEdit = await muted(() =>
       call(env, `/groups/${groupId}`, {
@@ -726,6 +888,25 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
       }),
     );
     assert.equal(deletedGroup.status, 404);
+
+    for (const name of ["Second group", "Third group"]) {
+      const created = await call(env, "/groups", {
+        method: "POST",
+        token: owner.token,
+        body: { name, emoji: "*" },
+      });
+      assert.equal(
+        created.status,
+        201,
+        created.body?.error,
+      );
+    }
+    const groupLimit = await call(env, "/groups", {
+      method: "POST",
+      token: owner.token,
+      body: { name: "Fourth group", emoji: "*" },
+    });
+    assert.equal(groupLimit.status, 429);
   } finally {
     database.close();
   }
@@ -800,6 +981,8 @@ test("random tips use cached quotes and client assets include the main controls"
       "Copy link",
       "auth-pending",
       "showSignedInApp",
+      "verifyEmailFromUrl",
+      "resendVerificationBtn",
     ])
       assert.ok(
         app.includes(feature) || html.includes(feature),

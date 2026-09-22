@@ -226,6 +226,18 @@ function updateAccountUI() {
     `WELCOME, ${me.name.toUpperCase()}`;
 }
 
+function updateEmailVerificationUI() {
+  const status = $("#accountEmailVerification");
+  const message = $("#accountEmailVerificationText");
+  const resend = $("#resendVerificationBtn");
+  if (!status || !message || !resend) return;
+  const verified = Boolean(me?.email_verified_at);
+  message.textContent = verified
+    ? "Email address verified."
+    : "Verify your email address before sending group invitations.";
+  resend.hidden = verified;
+}
+
 function balanceFor(group, userId = me?.id) {
   return (
     group.balances?.find((person) => person.id === userId)
@@ -1907,6 +1919,7 @@ function openAccountSettings() {
   setAccountAvatarEmojiPicker(false);
   updateAccountAvatarColorButtons();
   updateAccountAvatarPreview();
+  updateEmailVerificationUI();
   openDialog($("#accountDialog"));
 }
 
@@ -1957,6 +1970,24 @@ function openResetFromUrl() {
   openDialog($("#resetPasswordDialog"));
 }
 
+async function verifyEmailFromUrl() {
+  const verificationToken = new URLSearchParams(
+    location.search,
+  ).get("verify");
+  if (!verificationToken) return "";
+  try {
+    const result = await api("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    history.replaceState({}, "", location.pathname);
+    return result.message;
+  } catch (error) {
+    history.replaceState({}, "", location.pathname);
+    return error.message;
+  }
+}
+
 $("#authToggle").onclick = () => {
   mode = mode === "register" ? "login" : "register";
   $("#authSubmit").textContent =
@@ -1977,8 +2008,9 @@ if (forgotPasswordButton) {
 
 $("#authForm").onsubmit = async (event) => {
   event.preventDefault();
+  const submittedMode = mode;
   try {
-    const result = await api(`/auth/${mode}`, {
+    const result = await api(`/auth/${submittedMode}`, {
       method: "POST",
       body: JSON.stringify(
         Object.fromEntries(
@@ -1992,6 +2024,9 @@ $("#authForm").onsubmit = async (event) => {
     updateAccountUI();
     await load();
     showSignedInApp();
+    if (submittedMode === "register" && result.message) {
+      toast(result.message);
+    }
     await acceptInvite();
   } catch (error) {
     $("#authError").textContent = error.message;
@@ -2035,6 +2070,17 @@ if (forgotPasswordForm) {
     }
   };
 }
+
+$("#resendVerificationBtn").onclick = async () => {
+  try {
+    const result = await api("/auth/resend-verification", {
+      method: "POST",
+    });
+    toast(result.message);
+  } catch (error) {
+    toast(error.message);
+  }
+};
 
 const resetPasswordForm = $("#resetPasswordForm");
 if (resetPasswordForm) {
@@ -2253,7 +2299,11 @@ $("#accountForm").onsubmit = async (event) => {
     const groupId = activeGroup?.group.id;
     await load();
     if (groupId) await openGroup(groupId);
-    toast("Account settings saved");
+    toast(
+      result.user.email_verified_at
+        ? "Account settings saved"
+        : "Account settings saved. Verify your new email before sending invitations.",
+    );
   } catch (error) {
     toast(error.message);
   }
@@ -2637,9 +2687,13 @@ document.addEventListener("keydown", (event) => {
 });
 
 (async () => {
+  const emailVerificationMessage =
+    await verifyEmailFromUrl();
   openResetFromUrl();
   if (!token) {
     showAuthenticationScreen();
+    if (emailVerificationMessage)
+      toast(emailVerificationMessage);
     return;
   }
   try {
@@ -2647,9 +2701,13 @@ document.addEventListener("keydown", (event) => {
     updateAccountUI();
     await load();
     showSignedInApp();
+    if (emailVerificationMessage)
+      toast(emailVerificationMessage);
     await acceptInvite();
   } catch {
     localStorage.removeItem("splito-token");
     showAuthenticationScreen();
+    if (emailVerificationMessage)
+      toast(emailVerificationMessage);
   }
 })();

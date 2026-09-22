@@ -210,6 +210,34 @@ function createResetToken() {
   crypto.getRandomValues(bytes);
   return encode(bytes);
 }
+async function createEmailVerificationToken(db, userId) {
+  const token = createResetToken();
+  await db.batch([
+    db
+      .prepare(
+        "DELETE FROM email_verification_tokens WHERE user_id=?",
+      )
+      .bind(userId),
+    db
+      .prepare(
+        "INSERT INTO email_verification_tokens(user_id,token_hash,expires_at) VALUES(?,?,?)",
+      )
+      .bind(
+        userId,
+        await tokenHash(token),
+        Date.now() + 24 * 60 * 60 * 1000,
+      ),
+  ]);
+  return token;
+}
+function frontendUrl(request, env) {
+  return (
+    env.FRONTEND_URL || new URL(request.url).origin
+  ).replace(/\/$/, "");
+}
+function emailVerificationUrl(request, env, token) {
+  return `${frontendUrl(request, env)}/?verify=${encodeURIComponent(token)}`;
+}
 function isLocalFrontend(env) {
   return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(
     env.FRONTEND_URL || "",
@@ -252,6 +280,33 @@ async function sendPasswordResetEmail(
   );
   if (!response.ok) {
     console.error("Password-reset email delivery failed.");
+  }
+  return response.ok;
+}
+async function sendEmailVerificationEmail(
+  env,
+  email,
+  verificationUrl,
+) {
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM) return false;
+  const response = await fetch(
+    "https://api.resend.com/emails",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        from: env.RESEND_FROM,
+        to: [email],
+        subject: "Verify your Splito email address",
+        html: `<p>Welcome to Splito.</p><p><a href="${verificationUrl}">Verify your email address</a></p><p>Verify your email before sending group invitations. This link expires in 24 hours and can be used once.</p>`,
+      }),
+    },
+  );
+  if (!response.ok) {
+    console.error("Email-verification delivery failed.");
   }
   return response.ok;
 }
@@ -882,13 +937,37 @@ export default {
           avatar_emoji: null,
           avatar_image: null,
           avatar_color: null,
+          email_verified_at: null,
         };
+        const verificationToken =
+            await createEmailVerificationToken(db, user.id),
+          verificationUrl = emailVerificationUrl(
+            request,
+            env,
+            verificationToken,
+          );
+        try {
+          await sendEmailVerificationEmail(
+            env,
+            user.email,
+            verificationUrl,
+          );
+        } catch {
+          console.error(
+            "Email-verification delivery failed.",
+          );
+        }
         return json(
           request,
           env,
           {
             user,
             token: await signToken(user, env.JWT_SECRET),
+            message:
+              "Check your inbox to verify your email address before sending group invitations.",
+            ...(isLocalFrontend(env)
+              ? { debugVerificationUrl: verificationUrl }
+              : {}),
           },
           201,
         );
@@ -922,6 +1001,7 @@ export default {
           avatar_emoji: row.avatar_emoji,
           avatar_image: row.avatar_image,
           avatar_color: row.avatar_color,
+          email_verified_at: row.email_verified_at,
           auth_version: row.auth_version || 0,
         };
         return json(request, env, {
@@ -932,6 +1012,7 @@ export default {
             avatar_emoji: user.avatar_emoji,
             avatar_image: user.avatar_image,
             avatar_color: user.avatar_color,
+            email_verified_at: user.email_verified_at,
           },
           token: await signToken(user, env.JWT_SECRET),
         });
@@ -943,7 +1024,7 @@ export default {
         const { email } = await request.json(),
           cleanEmail = email?.toLowerCase().trim(),
           message =
-            "Check your inbox for a password-reset email.";
+            "If an account exists for this email, a password-reset link will be sent.";
         if (!cleanEmail?.includes("@"))
           return json(
             request,
@@ -958,17 +1039,9 @@ export default {
           .bind(cleanEmail)
           .first();
         if (!account)
-          return json(
-            request,
-            env,
-            {
-              error:
-                "No Splito account exists for this email address. Check the email or create an account.",
-            },
-            404,
-          );
+          return json(request, env, { message });
         const token = createResetToken(),
-          resetUrl = `${(env.FRONTEND_URL || new URL(request.url).origin).replace(/\/$/, "")}/?reset=${encodeURIComponent(token)}`;
+          resetUrl = `${frontendUrl(request, env)}/?reset=${encodeURIComponent(token)}`;
         await db.batch([
           db
             .prepare(
@@ -1068,6 +1141,62 @@ export default {
           message: "Password reset. You can now sign in.",
         });
       }
+      if (
+        request.method === "POST" &&
+        path === "/auth/verify-email"
+      ) {
+        const { token } = await request.json();
+        if (!token)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "This verification link is invalid or has expired.",
+            },
+            400,
+          );
+        const verification = await db
+            .prepare(
+              "SELECT id,user_id FROM email_verification_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>?",
+            )
+            .bind(await tokenHash(token), Date.now())
+            .first(),
+          message = "Your email address has been verified.";
+        if (!verification)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "This verification link is invalid or has expired.",
+            },
+            400,
+          );
+        const claim = await db
+          .prepare(
+            "UPDATE email_verification_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL AND expires_at>?",
+          )
+          .bind(verification.id, Date.now())
+          .run();
+        if (claim.meta.changes !== 1)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "This verification link is invalid or has expired.",
+            },
+            400,
+          );
+        await db
+          .prepare(
+            "UPDATE users SET email_verified_at=CURRENT_TIMESTAMP WHERE id=?",
+          )
+          .bind(verification.user_id)
+          .run();
+        return json(request, env, { message });
+      }
       const tokenUser = await currentUser(request, env);
       if (!tokenUser)
         return json(
@@ -1078,7 +1207,7 @@ export default {
         );
       const user = await db
         .prepare(
-          "SELECT id,name,email,auth_version FROM users WHERE id=?",
+          "SELECT id,name,email,email_verified_at,auth_version FROM users WHERE id=?",
         )
         .bind(tokenUser.id)
         .first();
@@ -1092,6 +1221,41 @@ export default {
           { error: "Please sign in." },
           401,
         );
+      if (
+        request.method === "POST" &&
+        path === "/auth/resend-verification"
+      ) {
+        if (user.email_verified_at)
+          return json(request, env, {
+            message:
+              "Your email address is already verified.",
+          });
+        const verificationToken =
+            await createEmailVerificationToken(db, user.id),
+          verificationUrl = emailVerificationUrl(
+            request,
+            env,
+            verificationToken,
+          );
+        try {
+          await sendEmailVerificationEmail(
+            env,
+            user.email,
+            verificationUrl,
+          );
+        } catch {
+          console.error(
+            "Email-verification delivery failed.",
+          );
+        }
+        return json(request, env, {
+          message:
+            "A new verification email has been sent.",
+          ...(isLocalFrontend(env)
+            ? { debugVerificationUrl: verificationUrl }
+            : {}),
+        });
+      }
       if (request.method === "GET" && path === "/tip")
         return json(request, env, {
           tip: await randomTip(request),
@@ -1100,7 +1264,7 @@ export default {
         return json(request, env, {
           user: await db
             .prepare(
-              "SELECT id,name,email,avatar_emoji,avatar_image,avatar_color FROM users WHERE id=?",
+              "SELECT id,name,email,avatar_emoji,avatar_image,avatar_color,email_verified_at FROM users WHERE id=?",
             )
             .bind(user.id)
             .first(),
@@ -1115,6 +1279,7 @@ export default {
           email = data.email?.toLowerCase().trim(),
           currentPassword = data.currentPassword || "",
           newPassword = data.newPassword || "",
+          emailChanged = email !== current?.email,
           avatarEmoji = groupIcon(data.avatarEmoji, ""),
           avatarImage =
             Object.prototype.hasOwnProperty.call(
@@ -1193,13 +1358,16 @@ export default {
           avatar_emoji: avatarEmoji || null,
           avatar_image: avatarImage,
           avatar_color: avatarColor,
+          email_verified_at: emailChanged
+            ? null
+            : current.email_verified_at,
           auth_version:
             current.auth_version +
             (protectedChange ? 1 : 0),
         };
         await db
           .prepare(
-            "UPDATE users SET name=?,email=?,avatar_emoji=?,avatar_image=?,avatar_color=?,password_hash=?,auth_version=auth_version+? WHERE id=?",
+            "UPDATE users SET name=?,email=?,avatar_emoji=?,avatar_image=?,avatar_color=?,email_verified_at=?,password_hash=?,auth_version=auth_version+? WHERE id=?",
           )
           .bind(
             name,
@@ -1207,6 +1375,7 @@ export default {
             updatedUser.avatar_emoji,
             updatedUser.avatar_image,
             updatedUser.avatar_color,
+            updatedUser.email_verified_at,
             newPassword
               ? await passwordHash(newPassword)
               : current.password_hash,
@@ -1214,6 +1383,30 @@ export default {
             current.id,
           )
           .run();
+        let verificationUrl;
+        if (emailChanged) {
+          const verificationToken =
+            await createEmailVerificationToken(
+              db,
+              current.id,
+            );
+          verificationUrl = emailVerificationUrl(
+            request,
+            env,
+            verificationToken,
+          );
+          try {
+            await sendEmailVerificationEmail(
+              env,
+              updatedUser.email,
+              verificationUrl,
+            );
+          } catch {
+            console.error(
+              "Email-verification delivery failed.",
+            );
+          }
+        }
         return json(request, env, {
           user: {
             id: updatedUser.id,
@@ -1222,11 +1415,16 @@ export default {
             avatar_emoji: updatedUser.avatar_emoji,
             avatar_image: updatedUser.avatar_image,
             avatar_color: updatedUser.avatar_color,
+            email_verified_at:
+              updatedUser.email_verified_at,
           },
           token: await signToken(
             updatedUser,
             env.JWT_SECRET,
           ),
+          ...(verificationUrl && isLocalFrontend(env)
+            ? { debugVerificationUrl: verificationUrl }
+            : {}),
         });
       }
       if (
@@ -1413,6 +1611,22 @@ export default {
             { error: "A group name is required." },
             400,
           );
+        const createdToday = await db
+          .prepare(
+            "SELECT COUNT(*) AS total FROM group_creation_events WHERE user_id=? AND created_at>=datetime('now','-1 day')",
+          )
+          .bind(user.id)
+          .first();
+        if (Number(createdToday?.total) >= 3)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "You can create up to 3 groups in a 24-hour period.",
+            },
+            429,
+          );
         const groupId = (
           await db
             .prepare(
@@ -1421,12 +1635,18 @@ export default {
             .bind(name.trim(), groupIcon(emoji), user.id)
             .run()
         ).meta.last_row_id;
-        await db
-          .prepare(
-            "INSERT INTO group_members(group_id,user_id) VALUES(?,?)",
-          )
-          .bind(groupId, user.id)
-          .run();
+        await db.batch([
+          db
+            .prepare(
+              "INSERT INTO group_members(group_id,user_id) VALUES(?,?)",
+            )
+            .bind(groupId, user.id),
+          db
+            .prepare(
+              "INSERT INTO group_creation_events(user_id) VALUES(?)",
+            )
+            .bind(user.id),
+        ]);
         return json(request, env, { id: groupId }, 201);
       }
       if (
@@ -1657,11 +1877,8 @@ export default {
             },
             409,
           );
-        const frontendUrl = (
-          env.FRONTEND_URL || new URL(request.url).origin
-        ).replace(/\/$/, "");
         return json(request, env, {
-          inviteUrl: `${frontendUrl}/?invite=${invite.token}`,
+          inviteUrl: `${frontendUrl(request, env)}/?invite=${invite.token}`,
         });
       }
       if (
@@ -1671,6 +1888,16 @@ export default {
       ) {
         const groupId = id(parts[1]);
         await ensureGroup(db, groupId, user.id);
+        if (!user.email_verified_at)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "Verify your email address before sending group invitations.",
+            },
+            403,
+          );
         const { email, addToFriends = false } =
             await request.json(),
           cleanEmail = email?.toLowerCase().trim();
@@ -1680,6 +1907,71 @@ export default {
             env,
             { error: "Enter a valid email." },
             400,
+          );
+        const inviteCount = await db
+          .prepare(
+            "SELECT COUNT(*) AS total FROM invites WHERE group_id=? AND invited_by=? AND created_at>=datetime('now','-1 day')",
+          )
+          .bind(groupId, user.id)
+          .first();
+        if (Number(inviteCount?.total) >= 10)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "You can send up to 10 invitations per group in a 24-hour period.",
+            },
+            429,
+          );
+        const recipientInviteCount = await db
+          .prepare(
+            "SELECT COUNT(*) AS total FROM invites WHERE email=? AND created_at>=datetime('now','-1 day')",
+          )
+          .bind(cleanEmail)
+          .first();
+        if (Number(recipientInviteCount?.total) >= 10)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "This email address has already received the maximum number of invitations for today.",
+            },
+            429,
+          );
+        const recipient = await db
+          .prepare("SELECT id FROM users WHERE email=?")
+          .bind(cleanEmail)
+          .first();
+        if (
+          recipient &&
+          (await member(db, groupId, recipient.id))
+        )
+          return json(
+            request,
+            env,
+            {
+              error:
+                "That person is already a member of this group.",
+            },
+            409,
+          );
+        const pendingInvite = await db
+          .prepare(
+            "SELECT id FROM invites WHERE group_id=? AND email=? AND accepted_at IS NULL",
+          )
+          .bind(groupId, cleanEmail)
+          .first();
+        if (pendingInvite)
+          return json(
+            request,
+            env,
+            {
+              error:
+                "A pending invitation has already been sent to this email address for this group.",
+            },
+            409,
           );
         const group = await db
           .prepare("SELECT name FROM groups WHERE id=?")
@@ -1698,7 +1990,7 @@ export default {
             addToFriends ? 1 : 0,
           )
           .run();
-        const inviteUrl = `${(env.FRONTEND_URL || new URL(request.url).origin).replace(/\/$/, "")}/?invite=${invite}`;
+        const inviteUrl = `${frontendUrl(request, env)}/?invite=${invite}`;
         const emailSent = await sendGroupInviteEmail(
           env,
           cleanEmail,
