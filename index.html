@@ -364,6 +364,23 @@
         border-radius: 12px;
         background: #f8fbf9;
       }
+      .account-email-verification {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid #dce8e3;
+        border-radius: 10px;
+        background: #f8fbf9;
+        color: #43645a;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .account-email-verification .text-button {
+        flex: 0 0 auto;
+        padding: 0;
+      }
       .account-avatar-preview {
         width: 64px;
         height: 64px;
@@ -1899,6 +1916,21 @@
               type="email"
               autocomplete="email"
           /></label>
+        </div>
+        <div
+          class="account-email-verification"
+          id="accountEmailVerification"
+          role="status"
+          aria-live="polite"
+        >
+          <span id="accountEmailVerificationText"></span>
+          <button
+            class="text-button"
+            id="resendVerificationBtn"
+            type="button"
+          >
+            Resend email
+          </button>
         </div>
         <div class="account-avatar-editor">
           <div

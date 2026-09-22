@@ -59,7 +59,7 @@ GitHub Actions requires the two GitHub secrets above. Local development requires
 
 ### Email delivery setup
 
-Password-reset links and group invitations are sent through [Resend](https://resend.com/docs) in production, so create a Resend API key and verify the sending domain first (for example, `squarelab.in`). Resend documents that a sending domain must be verified before use. Password-reset links are one-time links that expire after one hour; group invitations remain pending until the recipient accepts them.
+Email-verification links, password-reset links, and group invitations are sent through [Resend](https://resend.com/docs) in production, so create a Resend API key and verify the sending domain first (for example, `squarelab.in`). Resend documents that a sending domain must be verified before use. Password-reset links are one-time links that expire after one hour; group invitations remain pending until the recipient accepts them.
 
 Set both production Worker secrets from the repository folder:
 
@@ -68,7 +68,20 @@ npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put RESEND_FROM
 ```
 
-For `RESEND_FROM`, use a verified sender such as `Splito <no-reply@squarelab.in>`. Do not add either value to `wrangler.jsonc` or commit it to Git. Local password-reset and group-invite flows work without Resend by displaying a local-only link. To send real emails locally, put the same two values in ignored `.dev.vars`.
+For `RESEND_FROM`, use a verified sender such as `Splito <no-reply@squarelab.in>`. Do not add either value to `wrangler.jsonc` or commit it to Git. Local verification, password-reset, and group-invite flows work without Resend by displaying a local-only link. To send real emails locally, put the same two values in ignored `.dev.vars`.
+
+### Email verification and anti-abuse limits
+
+New accounts receive a one-use verification link that expires after 24 hours. A user must verify the email address before sending a group invitation. The **Your account** dialog shows whether the address is verified and lets an unverified user request a replacement link. Changing the account email address makes it unverified again and sends a link to the new address.
+
+Migration `0008_email-verification-and-abuse-limits.sql` marks accounts created before this feature as verified, so existing users are not unexpectedly locked out. It also enforces these rolling 24-hour limits in D1:
+
+- A user can create at most **3 groups**.
+- A user can send at most **10 invitations per group**.
+- A recipient email can receive at most **10 invitations**.
+- Only one pending invitation is allowed for the same recipient email and group; an existing group member cannot be invited again.
+
+The forgot-password endpoint deliberately gives the same successful response for an existing and unknown email address: `If an account exists for this email, a password-reset link will be sent.` This avoids disclosing which email addresses have accounts. Do not change this to a distinct “user does not exist” response on a public deployment.
 
 ## Local development
 
