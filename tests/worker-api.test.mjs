@@ -815,6 +815,13 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
       firstPage.body.activityPagination.totalPages,
       3,
     );
+    const dashboardGroup = firstPage.body.groups.find(
+      (group) => group.id === groupId,
+    );
+    assert.equal(dashboardGroup.balance_cents, 4000);
+    assert.deepEqual(dashboardGroup.balances, [
+      { id: owner.user.id, balance_cents: 4000 },
+    ]);
     assert.ok(
       firstPage.body.friends.some(
         (person) => person.id === friend.user.id,

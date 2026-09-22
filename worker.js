@@ -482,6 +482,30 @@ async function friendBalances(db, userId, friendIds) {
   }
   return result;
 }
+async function userGroupBalances(db, userId) {
+  const rows = await db
+    .prepare(
+      "SELECT group_id,SUM(delta_cents) AS balance_cents FROM (SELECT e.group_id,CASE WHEN e.paid_by=? THEN e.amount_cents ELSE 0 END AS delta_cents FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? UNION ALL SELECT e.group_id,-s.amount_cents AS delta_cents FROM expense_splits s JOIN expenses e ON e.id=s.expense_id JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? WHERE s.user_id=? UNION ALL SELECT s.group_id,CASE WHEN s.paid_by=? THEN s.amount_cents WHEN s.paid_to=? THEN -s.amount_cents ELSE 0 END AS delta_cents FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id AND mine.user_id=? WHERE s.paid_by=? OR s.paid_to=?) GROUP BY group_id",
+    )
+    .bind(
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+    )
+    .all();
+  return new Map(
+    rows.results.map((row) => [
+      row.group_id,
+      Number(row.balance_cents) || 0,
+    ]),
+  );
+}
 function friendshipPair(firstUserId, secondUserId) {
   return firstUserId < secondUserId
     ? [firstUserId, secondUserId]
@@ -1447,8 +1471,20 @@ export default {
           )
           .bind(user.id)
           .all();
-        for (const group of groups.results)
-          group.balances = await balances(db, group.id);
+        const groupBalanceMap = await userGroupBalances(
+          db,
+          user.id,
+        );
+        for (const group of groups.results) {
+          group.balance_cents =
+            groupBalanceMap.get(group.id) || 0;
+          group.balances = [
+            {
+              id: user.id,
+              balance_cents: group.balance_cents,
+            },
+          ];
+        }
         const activityCount = await db
           .prepare(
             "SELECT (SELECT COUNT(*) FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id WHERE mine.user_id=?) + (SELECT COUNT(*) FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id WHERE mine.user_id=?) AS total",

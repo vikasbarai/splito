@@ -259,6 +259,11 @@ function updateEmailVerificationUI() {
 }
 
 function balanceFor(group, userId = me?.id) {
+  if (
+    userId === me?.id &&
+    Number.isFinite(Number(group.balance_cents))
+  )
+    return Number(group.balance_cents);
   return (
     group.balances?.find((person) => person.id === userId)
       ?.balance_cents || 0
