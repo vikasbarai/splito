@@ -646,13 +646,21 @@
       }
       .profile-actions {
         display: flex;
-        gap: 4px;
+        gap: 8px;
         margin-left: auto;
       }
       .profile .profile-actions button {
+        display: grid;
+        width: 34px;
+        height: 34px;
         margin-left: 0;
-        border-radius: 6px;
-        padding: 6px;
+        place-items: center;
+        border-radius: 9px;
+        padding: 0;
+        font-size: 16px;
+      }
+      .profile .profile-actions button:hover {
+        background: #286053;
       }
       .mobile-account,
       .mobile-nav,
@@ -948,8 +956,7 @@
             AC
           </div>
           <div>
-            <strong id="profileName">Account</strong
-            ><small>Personal account</small>
+            <strong id="profileName">Account</strong>
           </div>
           <div class="profile-actions">
             <button
