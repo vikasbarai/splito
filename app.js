@@ -306,10 +306,30 @@ function expenseSplitDetailsMarkup(entry) {
   return `<div class="expense-split-details"><span class="split-method-badge">${esc(splitMethodLabel(entry))}</span><span class="split-breakdown">${breakdown}</span></div>`;
 }
 
-function activityMarkup(entry, controls = false) {
+function editedAmountText(
+  entry,
+  currentEntries,
+  originalKey,
+) {
+  if (entry.history_action !== "edited") return "";
+  const current = currentEntries.find(
+    (candidate) =>
+      !candidate.history_action &&
+      Number(candidate.id) === Number(entry[originalKey]),
+  );
+  if (!current) return "";
+  return `<span class="amount-change"><span>Previous ${money(entry.amount_cents)}</span><span aria-hidden="true">-&gt;</span><span>New ${money(current.amount_cents)}</span></span>`;
+}
+
+function activityMarkup(
+  entry,
+  controls = false,
+  currentEntries = [],
+) {
   const date =
     entry.activity_date || entry.expense_date || "";
   const isSettlement = entry.entry_type === "settlement";
+  const isArchived = Boolean(entry.history_action);
   const description = isSettlement
     ? { emoji: "", text: "" }
     : entry.emoji
@@ -328,20 +348,97 @@ function activityMarkup(entry, controls = false) {
     ? ""
     : expenseSplitDetailsMarkup(entry);
   const receipt = receiptLinkMarkup(entry);
-  const actions = controls
-    ? `<span class="entry-actions"><button class="entry-button" type="button" data-edit-expense="${entry.id}">Edit</button><button class="entry-button danger" type="button" data-delete-expense="${entry.id}">Delete</button></span>`
+  const archiveText = isArchived
+    ? `<span class="archive-status">${entry.history_action === "deleted" ? "Deleted" : "Edited"} ${entry.archived_at ? `on ${esc(String(entry.archived_at).slice(0, 16))}` : ""}${entry.archived_by_name ? ` by ${esc(entry.archived_by_name)}` : ""}</span>`
     : "";
+  const currentText =
+    !isArchived && entry.has_edited_history
+      ? '<span class="current-version-status">Current version</span>'
+      : "";
+  const amountChange = editedAmountText(
+    entry,
+    currentEntries,
+    "original_expense_id",
+  );
+  const actions =
+    controls && !isArchived
+      ? `<span class="entry-actions"><button class="entry-button" type="button" data-edit-expense="${entry.id}">Edit</button><button class="entry-button danger" type="button" data-delete-expense="${entry.id}">Delete</button></span>`
+      : "";
   const icon = description.emoji
     ? esc(description.emoji)
     : categoryIcon(entry.category);
-  return `<div class="activity-item"><div class="expense-icon">${icon}</div><div class="activity-main"><strong>${esc(title)}</strong><span>${esc(detail)}</span>${splitDetails}${receipt}</div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
+  const rowClass = [
+    "activity-item",
+    isArchived ? "archived-entry" : "",
+    entry.has_edited_history ? "has-history-pair" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `<div class="${rowClass}"><div class="expense-icon">${icon}</div><div class="activity-main"><strong>${esc(title)}</strong><span>${esc(detail)}</span>${currentText}${archiveText}${amountChange}${splitDetails}${receipt}</div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
 }
 
-function settlementMarkup(entry, controls = false) {
-  const actions = controls
-    ? `<span class="entry-actions"><button class="entry-button" type="button" data-edit-settlement="${entry.id}">Edit</button><button class="entry-button danger" type="button" data-delete-settlement="${entry.id}">Delete</button></span>`
+function settlementMarkup(
+  entry,
+  controls = false,
+  currentEntries = [],
+) {
+  const isArchived = Boolean(entry.history_action);
+  const archiveText = isArchived
+    ? `<span class="archive-status">${entry.history_action === "deleted" ? "Deleted" : "Edited"} ${entry.archived_at ? `on ${esc(String(entry.archived_at).slice(0, 16))}` : ""}${entry.archived_by_name ? ` by ${esc(entry.archived_by_name)}` : ""}</span>`
     : "";
-  return `<div class="activity-item"><div class="expense-icon">&#x2713;</div><div class="activity-main"><strong>${esc(entry.payer_name)} paid ${esc(entry.payee_name)}</strong><span>${esc(String(entry.settled_at).slice(0, 10))}</span>${receiptLinkMarkup(entry)}</div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
+  const currentText =
+    !isArchived && entry.has_edited_history
+      ? '<span class="current-version-status">Current version</span>'
+      : "";
+  const amountChange = editedAmountText(
+    entry,
+    currentEntries,
+    "original_settlement_id",
+  );
+  const actions =
+    controls && !isArchived
+      ? `<span class="entry-actions"><button class="entry-button" type="button" data-edit-settlement="${entry.id}">Edit</button><button class="entry-button danger" type="button" data-delete-settlement="${entry.id}">Delete</button></span>`
+      : "";
+  const rowClass = [
+    "activity-item",
+    isArchived ? "archived-entry" : "",
+    entry.has_edited_history ? "has-history-pair" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `<div class="${rowClass}"><div class="expense-icon">&#x2713;</div><div class="activity-main"><strong>${esc(entry.payer_name)} paid ${esc(entry.payee_name)}</strong><span>${esc(String(entry.settled_at).slice(0, 10))}</span>${currentText}${archiveText}${amountChange}${receiptLinkMarkup(entry)}</div><div class="activity-amount"><b>${money(entry.amount_cents)}</b>${actions}</div></div>`;
+}
+
+function pairedHistoryEntries(
+  entries,
+  originalKey,
+  markerKey = "has_edited_history",
+) {
+  const editedByOriginalId = new Map();
+  const deleted = [];
+  const active = [];
+  for (const entry of entries) {
+    if (!entry.history_action) active.push(entry);
+    else if (entry.history_action === "edited") {
+      const key = Number(entry[originalKey]);
+      if (!editedByOriginalId.has(key))
+        editedByOriginalId.set(key, []);
+      editedByOriginalId.get(key).push(entry);
+    } else deleted.push(entry);
+  }
+  const ordered = [];
+  for (const entry of active) {
+    const edits =
+      editedByOriginalId.get(Number(entry.id)) || [];
+    if (edits.length) entry[markerKey] = true;
+    ordered.push(entry, ...edits);
+    editedByOriginalId.delete(Number(entry.id));
+  }
+  return [
+    ...ordered,
+    ...[...editedByOriginalId.values()].flat(),
+    ...deleted,
+  ];
 }
 
 function receiptLinkMarkup(entry) {
@@ -575,12 +672,30 @@ async function openGroup(groupId) {
       .join("") ||
     "<p>No invitations have been sent for this group.</p>";
   $("#detailExpenses").innerHTML =
-    activeGroup.expenses
-      .map((entry) => activityMarkup(entry, isGroupOwner))
+    pairedHistoryEntries(
+      activeGroup.expenses,
+      "original_expense_id",
+    )
+      .map((entry) =>
+        activityMarkup(
+          entry,
+          isGroupOwner,
+          activeGroup.expenses,
+        ),
+      )
       .join("") || "<p>No expenses in this group yet.</p>";
   $("#detailSettlements").innerHTML =
-    activeGroup.settlements
-      .map((entry) => settlementMarkup(entry, isGroupOwner))
+    pairedHistoryEntries(
+      activeGroup.settlements,
+      "original_settlement_id",
+    )
+      .map((entry) =>
+        settlementMarkup(
+          entry,
+          isGroupOwner,
+          activeGroup.settlements,
+        ),
+      )
       .join("") || "<p>No settlements yet.</p>";
   view("group");
 }
@@ -2496,7 +2611,7 @@ async function deleteEntry(type, entryId, label) {
   if (
     !activeGroup ||
     !window.confirm(
-      `Delete this ${label}? This cannot be undone.`,
+      `Delete this ${label}? It will be archived in the group history.`,
     )
   )
     return;

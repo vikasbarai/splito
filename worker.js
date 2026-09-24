@@ -430,7 +430,7 @@ async function friendBalances(db, userId, friendIds) {
   if (!result.size) return result;
   const expenseSplits = await db
     .prepare(
-      "SELECT e.paid_by,s.user_id,s.amount_cents FROM expenses e JOIN expense_splits s ON s.expense_id=e.id JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=?",
+      "SELECT e.paid_by,s.user_id,s.amount_cents FROM expenses e JOIN expense_splits s ON s.expense_id=e.id JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? WHERE e.deleted_at IS NULL",
     )
     .bind(userId)
     .all();
@@ -456,7 +456,7 @@ async function friendBalances(db, userId, friendIds) {
   }
   const settlements = await db
     .prepare(
-      "SELECT s.paid_by,s.paid_to,s.amount_cents FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id AND mine.user_id=?",
+      "SELECT s.paid_by,s.paid_to,s.amount_cents FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id AND mine.user_id=? WHERE s.deleted_at IS NULL",
     )
     .bind(userId)
     .all();
@@ -485,7 +485,7 @@ async function friendBalances(db, userId, friendIds) {
 async function userGroupBalances(db, userId) {
   const rows = await db
     .prepare(
-      "SELECT group_id,SUM(delta_cents) AS balance_cents FROM (SELECT e.group_id,CASE WHEN e.paid_by=? THEN e.amount_cents ELSE 0 END AS delta_cents FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? UNION ALL SELECT e.group_id,-s.amount_cents AS delta_cents FROM expense_splits s JOIN expenses e ON e.id=s.expense_id JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? WHERE s.user_id=? UNION ALL SELECT s.group_id,CASE WHEN s.paid_by=? THEN s.amount_cents WHEN s.paid_to=? THEN -s.amount_cents ELSE 0 END AS delta_cents FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id AND mine.user_id=? WHERE s.paid_by=? OR s.paid_to=?) GROUP BY group_id",
+      "SELECT group_id,SUM(delta_cents) AS balance_cents FROM (SELECT e.group_id,CASE WHEN e.paid_by=? THEN e.amount_cents ELSE 0 END AS delta_cents FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? WHERE e.deleted_at IS NULL UNION ALL SELECT e.group_id,-s.amount_cents AS delta_cents FROM expense_splits s JOIN expenses e ON e.id=s.expense_id JOIN group_members mine ON mine.group_id=e.group_id AND mine.user_id=? WHERE s.user_id=? AND e.deleted_at IS NULL UNION ALL SELECT s.group_id,CASE WHEN s.paid_by=? THEN s.amount_cents WHEN s.paid_to=? THEN -s.amount_cents ELSE 0 END AS delta_cents FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id AND mine.user_id=? WHERE (s.paid_by=? OR s.paid_to=?) AND s.deleted_at IS NULL) GROUP BY group_id",
     )
     .bind(
       userId,
@@ -544,7 +544,7 @@ async function balances(db, groupId) {
   );
   const expenses = await db
     .prepare(
-      "SELECT paid_by,amount_cents FROM expenses WHERE group_id=?",
+      "SELECT paid_by,amount_cents FROM expenses WHERE group_id=? AND deleted_at IS NULL",
     )
     .bind(groupId)
     .all();
@@ -554,7 +554,7 @@ async function balances(db, groupId) {
   }
   const splits = await db
     .prepare(
-      "SELECT s.user_id,s.amount_cents AS split_cents FROM expense_splits s JOIN expenses e ON e.id=s.expense_id WHERE e.group_id=?",
+      "SELECT s.user_id,s.amount_cents AS split_cents FROM expense_splits s JOIN expenses e ON e.id=s.expense_id WHERE e.group_id=? AND e.deleted_at IS NULL",
     )
     .bind(groupId)
     .all();
@@ -564,7 +564,7 @@ async function balances(db, groupId) {
   }
   const settlements = await db
     .prepare(
-      "SELECT paid_by,paid_to,amount_cents FROM settlements WHERE group_id=?",
+      "SELECT paid_by,paid_to,amount_cents FROM settlements WHERE group_id=? AND deleted_at IS NULL",
     )
     .bind(groupId)
     .all();
@@ -862,6 +862,74 @@ function splitStatements(db, expenseId, splits) {
       )
       .bind(expenseId, split.userId, split.cents),
   );
+}
+async function archiveExpense(db, expense, action, userId) {
+  const archived = await db
+    .prepare(
+      "INSERT INTO expense_history(original_expense_id,group_id,description,emoji,split_method,amount_cents,paid_by,category,expense_date,notes,receipt_image,original_created_at,history_action,archived_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      expense.id,
+      expense.group_id,
+      expense.description,
+      expense.emoji,
+      expense.split_method,
+      expense.amount_cents,
+      expense.paid_by,
+      expense.category,
+      expense.expense_date,
+      expense.notes,
+      expense.receipt_image,
+      expense.created_at,
+      action,
+      userId,
+    )
+    .run();
+  const historyId = archived.meta.last_row_id;
+  const splits = await db
+    .prepare(
+      "SELECT user_id,amount_cents FROM expense_splits WHERE expense_id=?",
+    )
+    .bind(expense.id)
+    .all();
+  if (splits.results.length)
+    await db.batch(
+      splits.results.map((split) =>
+        db
+          .prepare(
+            "INSERT INTO expense_history_splits(history_id,user_id,amount_cents) VALUES(?,?,?)",
+          )
+          .bind(
+            historyId,
+            split.user_id,
+            split.amount_cents,
+          ),
+      ),
+    );
+}
+async function archiveSettlement(
+  db,
+  settlement,
+  action,
+  userId,
+) {
+  await db
+    .prepare(
+      "INSERT INTO settlement_history(original_settlement_id,group_id,paid_by,paid_to,amount_cents,settled_at,receipt_image,original_created_at,history_action,archived_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      settlement.id,
+      settlement.group_id,
+      settlement.paid_by,
+      settlement.paid_to,
+      settlement.amount_cents,
+      settlement.settled_at,
+      settlement.receipt_image,
+      settlement.created_at,
+      action,
+      userId,
+    )
+    .run();
 }
 async function settlementInput(
   db,
@@ -1487,7 +1555,7 @@ export default {
         }
         const activityCount = await db
           .prepare(
-            "SELECT (SELECT COUNT(*) FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id WHERE mine.user_id=?) + (SELECT COUNT(*) FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id WHERE mine.user_id=?) AS total",
+            "SELECT (SELECT COUNT(*) FROM expenses e JOIN group_members mine ON mine.group_id=e.group_id WHERE mine.user_id=? AND e.deleted_at IS NULL) + (SELECT COUNT(*) FROM settlements s JOIN group_members mine ON mine.group_id=s.group_id WHERE mine.user_id=? AND s.deleted_at IS NULL) AS total",
           )
           .bind(user.id, user.id)
           .first();
@@ -1503,7 +1571,7 @@ export default {
         );
         const activity = await db
           .prepare(
-            "SELECT e.id,e.group_id,e.description,e.emoji,NULL AS receipt_image,e.amount_cents,e.category,e.expense_date AS activity_date,e.created_at,g.name AS group_name,u.name AS payer_name,'expense' AS entry_type FROM expenses e JOIN groups g ON g.id=e.group_id JOIN users u ON u.id=e.paid_by JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? UNION ALL SELECT s.id,s.group_id,'Settlement' AS description,NULL AS emoji,NULL AS receipt_image,s.amount_cents,'settlement' AS category,substr(s.settled_at,1,10) AS activity_date,s.settled_at AS created_at,g.name AS group_name,a.name || ' paid ' || b.name AS payer_name,'settlement' AS entry_type FROM settlements s JOIN groups g ON g.id=s.group_id JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "SELECT e.id,e.group_id,e.description,e.emoji,NULL AS receipt_image,e.amount_cents,e.category,e.expense_date AS activity_date,e.created_at,g.name AS group_name,u.name AS payer_name,'expense' AS entry_type FROM expenses e JOIN groups g ON g.id=e.group_id JOIN users u ON u.id=e.paid_by JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? WHERE e.deleted_at IS NULL UNION ALL SELECT s.id,s.group_id,'Settlement' AS description,NULL AS emoji,NULL AS receipt_image,s.amount_cents,'settlement' AS category,substr(s.settled_at,1,10) AS activity_date,s.settled_at AS created_at,g.name AS group_name,a.name || ' paid ' || b.name AS payer_name,'settlement' AS entry_type FROM settlements s JOIN groups g ON g.id=s.group_id JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to JOIN group_members mine ON mine.group_id=g.id AND mine.user_id=? WHERE s.deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?",
           )
           .bind(
             user.id,
@@ -1736,6 +1804,21 @@ export default {
             )
             .bind(groupId),
           db
+            .prepare(
+              "DELETE FROM expense_history_splits WHERE history_id IN (SELECT id FROM expense_history WHERE group_id=?)",
+            )
+            .bind(groupId),
+          db
+            .prepare(
+              "DELETE FROM expense_history WHERE group_id=?",
+            )
+            .bind(groupId),
+          db
+            .prepare(
+              "DELETE FROM settlement_history WHERE group_id=?",
+            )
+            .bind(groupId),
+          db
             .prepare("DELETE FROM invites WHERE group_id=?")
             .bind(groupId),
           db
@@ -1773,13 +1856,25 @@ export default {
             .all(),
           expenses = await db
             .prepare(
-              "SELECT e.*,u.name payer_name FROM expenses e JOIN users u ON u.id=e.paid_by WHERE e.group_id=? ORDER BY e.expense_date DESC,e.created_at DESC",
+              "SELECT e.*,u.name payer_name,NULL AS history_action,NULL AS archived_at,NULL AS archived_by_name FROM expenses e JOIN users u ON u.id=e.paid_by WHERE e.group_id=? AND e.deleted_at IS NULL ORDER BY e.expense_date DESC,e.created_at DESC",
+            )
+            .bind(groupId)
+            .all(),
+          expenseHistory = await db
+            .prepare(
+              "SELECT h.id,h.original_expense_id, h.group_id,h.description,h.emoji,h.split_method,h.amount_cents,h.paid_by,h.category,h.expense_date,h.notes,h.receipt_image,h.original_created_at AS created_at,h.history_action,h.archived_at,u.name payer_name,editor.name AS archived_by_name FROM expense_history h JOIN users u ON u.id=h.paid_by LEFT JOIN users editor ON editor.id=h.archived_by WHERE h.group_id=? ORDER BY h.expense_date DESC,h.archived_at DESC",
             )
             .bind(groupId)
             .all(),
           settlements = await db
             .prepare(
-              "SELECT s.*,a.name payer_name,b.name payee_name FROM settlements s JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to WHERE s.group_id=? ORDER BY s.settled_at DESC",
+              "SELECT s.*,a.name payer_name,b.name payee_name,NULL AS history_action,NULL AS archived_at,NULL AS archived_by_name FROM settlements s JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to WHERE s.group_id=? AND s.deleted_at IS NULL ORDER BY s.settled_at DESC",
+            )
+            .bind(groupId)
+            .all(),
+          settlementHistory = await db
+            .prepare(
+              "SELECT h.id,h.original_settlement_id,h.group_id,h.paid_by,h.paid_to,h.amount_cents,h.settled_at,h.receipt_image,h.original_created_at AS created_at,h.history_action,h.archived_at,a.name payer_name,b.name payee_name,editor.name AS archived_by_name FROM settlement_history h JOIN users a ON a.id=h.paid_by JOIN users b ON b.id=h.paid_to LEFT JOIN users editor ON editor.id=h.archived_by WHERE h.group_id=? ORDER BY h.settled_at DESC,h.archived_at DESC",
             )
             .bind(groupId)
             .all(),
@@ -1798,11 +1893,52 @@ export default {
               .bind(expense.id)
               .all()
           ).results;
+        for (const expense of expenseHistory.results)
+          expense.splits = (
+            await db
+              .prepare(
+                "SELECT s.*,u.name FROM expense_history_splits s JOIN users u ON u.id=s.user_id WHERE history_id=?",
+              )
+              .bind(expense.id)
+              .all()
+          ).results;
+        const allExpenses = [
+          ...expenses.results,
+          ...expenseHistory.results,
+        ].sort(
+          (left, right) =>
+            String(
+              right.expense_date || right.archived_at || "",
+            ).localeCompare(
+              String(
+                left.expense_date || left.archived_at || "",
+              ),
+            ) ||
+            String(
+              right.archived_at || right.created_at || "",
+            ).localeCompare(
+              String(
+                left.archived_at || left.created_at || "",
+              ),
+            ),
+        );
+        const allSettlements = [
+          ...settlements.results,
+          ...settlementHistory.results,
+        ].sort((left, right) =>
+          String(
+            right.settled_at || right.archived_at || "",
+          ).localeCompare(
+            String(
+              left.settled_at || left.archived_at || "",
+            ),
+          ),
+        );
         return json(request, env, {
           group,
           members: members.results,
-          expenses: expenses.results,
-          settlements: settlements.results,
+          expenses: allExpenses,
+          settlements: allSettlements,
           invites: invites.results,
           balances: await balances(db, groupId),
         });
@@ -2178,7 +2314,9 @@ export default {
       ) {
         const expenseId = id(parts[1]);
         const existing = await db
-          .prepare("SELECT * FROM expenses WHERE id=?")
+          .prepare(
+            "SELECT * FROM expenses WHERE id=? AND deleted_at IS NULL",
+          )
           .bind(expenseId)
           .first();
         if (!existing)
@@ -2206,10 +2344,16 @@ export default {
             400,
           );
         const { expense, splitMethod, splits } = input;
+        await archiveExpense(
+          db,
+          existing,
+          "edited",
+          user.id,
+        );
         await db.batch([
           db
             .prepare(
-              "UPDATE expenses SET description=?,emoji=?,split_method=?,amount_cents=?,paid_by=?,category=?,expense_date=?,notes=?,receipt_image=? WHERE id=?",
+              "UPDATE expenses SET description=?,emoji=?,split_method=?,amount_cents=?,paid_by=?,category=?,expense_date=?,notes=?,receipt_image=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE id=?",
             )
             .bind(
               expense.description,
@@ -2221,6 +2365,7 @@ export default {
               expense.date,
               expense.notes,
               expense.receiptImage,
+              user.id,
               expenseId,
             ),
           db
@@ -2237,7 +2382,9 @@ export default {
         request.method === "DELETE"
       ) {
         const expense = await db
-          .prepare("SELECT * FROM expenses WHERE id=?")
+          .prepare(
+            "SELECT * FROM expenses WHERE id=? AND deleted_at IS NULL",
+          )
           .bind(id(parts[1]))
           .first();
         if (!expense)
@@ -2252,9 +2399,17 @@ export default {
           expense.group_id,
           user.id,
         );
+        await archiveExpense(
+          db,
+          expense,
+          "deleted",
+          user.id,
+        );
         await db
-          .prepare("DELETE FROM expenses WHERE id=?")
-          .bind(expense.id)
+          .prepare(
+            "UPDATE expenses SET deleted_at=CURRENT_TIMESTAMP,deleted_by=? WHERE id=?",
+          )
+          .bind(user.id, expense.id)
           .run();
         return new Response(null, {
           status: 204,
@@ -2304,7 +2459,9 @@ export default {
       ) {
         const settlementId = id(parts[1]);
         const existing = await db
-          .prepare("SELECT * FROM settlements WHERE id=?")
+          .prepare(
+            "SELECT * FROM settlements WHERE id=? AND deleted_at IS NULL",
+          )
           .bind(settlementId)
           .first();
         if (
@@ -2336,9 +2493,15 @@ export default {
             400,
           );
         const { settlement } = input;
+        await archiveSettlement(
+          db,
+          existing,
+          "edited",
+          user.id,
+        );
         await db
           .prepare(
-            "UPDATE settlements SET paid_by=?,paid_to=?,amount_cents=?,settled_at=?,receipt_image=? WHERE id=?",
+            "UPDATE settlements SET paid_by=?,paid_to=?,amount_cents=?,settled_at=?,receipt_image=?,updated_at=CURRENT_TIMESTAMP,updated_by=? WHERE id=?",
           )
           .bind(
             settlement.paidBy,
@@ -2346,6 +2509,7 @@ export default {
             settlement.cents,
             settlement.settledAt,
             settlement.receiptImage,
+            user.id,
             settlementId,
           )
           .run();
@@ -2357,7 +2521,9 @@ export default {
         request.method === "DELETE"
       ) {
         const settlement = await db
-          .prepare("SELECT * FROM settlements WHERE id=?")
+          .prepare(
+            "SELECT * FROM settlements WHERE id=? AND deleted_at IS NULL",
+          )
           .bind(id(parts[1]))
           .first();
         if (
@@ -2375,9 +2541,17 @@ export default {
           settlement.group_id,
           user.id,
         );
+        await archiveSettlement(
+          db,
+          settlement,
+          "deleted",
+          user.id,
+        );
         await db
-          .prepare("DELETE FROM settlements WHERE id=?")
-          .bind(settlement.id)
+          .prepare(
+            "UPDATE settlements SET deleted_at=CURRENT_TIMESTAMP,deleted_by=? WHERE id=?",
+          )
+          .bind(user.id, settlement.id)
           .run();
         return new Response(null, {
           status: 204,

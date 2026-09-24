@@ -705,6 +705,30 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
     assert.equal(group.status, 200, group.body?.error);
     assert.equal(group.body.group.owner_name, "Owner");
     assert.equal(group.body.members.length, 4);
+    const editedExpenseHistory = group.body.expenses.find(
+      (expense) =>
+        expense.original_expense_id === expenseIds[1] &&
+        expense.history_action === "edited",
+    );
+    assert.ok(editedExpenseHistory);
+    assert.equal(
+      editedExpenseHistory.splits.reduce(
+        (sum, split) => sum + split.amount_cents,
+        0,
+      ),
+      1000,
+    );
+    const editedExpenseCurrent = group.body.expenses.find(
+      (expense) =>
+        expense.id === expenseIds[1] &&
+        !expense.history_action,
+    );
+    assert.equal(editedExpenseHistory.amount_cents, 1000);
+    assert.equal(editedExpenseCurrent.amount_cents, 1000);
+    assert.notDeepEqual(
+      editedExpenseHistory.splits,
+      editedExpenseCurrent.splits,
+    );
     assert.deepEqual(
       new Set(
         group.body.expenses.map(
@@ -795,6 +819,53 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
       },
     );
     assert.equal(ownerSettlementDelete.status, 204);
+    const afterSettlementDelete = await call(
+      env,
+      `/groups/${groupId}`,
+      {
+        token: owner.token,
+      },
+    );
+    assert.equal(
+      afterSettlementDelete.status,
+      200,
+      afterSettlementDelete.body?.error,
+    );
+    assert.ok(
+      afterSettlementDelete.body.settlements.some(
+        (settlement) =>
+          settlement.original_settlement_id ===
+            settlementId &&
+          settlement.history_action === "edited",
+      ),
+    );
+    const editedSettlementHistory =
+      afterSettlementDelete.body.settlements.find(
+        (settlement) =>
+          settlement.original_settlement_id ===
+            settlementId &&
+          settlement.history_action === "edited",
+      );
+    const deletedSettlementHistory =
+      afterSettlementDelete.body.settlements.find(
+        (settlement) =>
+          settlement.original_settlement_id ===
+            settlementId &&
+          settlement.history_action === "deleted",
+      );
+    assert.equal(editedSettlementHistory.amount_cents, 300);
+    assert.equal(
+      deletedSettlementHistory.amount_cents,
+      400,
+    );
+    assert.ok(
+      afterSettlementDelete.body.settlements.some(
+        (settlement) =>
+          settlement.original_settlement_id ===
+            settlementId &&
+          settlement.history_action === "deleted",
+      ),
+    );
 
     const firstPage = await call(
       env,
@@ -879,6 +950,33 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
       },
     );
     assert.equal(ownerExpenseDelete.status, 204);
+    const afterExpenseDelete = await call(
+      env,
+      `/groups/${groupId}`,
+      {
+        token: owner.token,
+      },
+    );
+    assert.equal(
+      afterExpenseDelete.status,
+      200,
+      afterExpenseDelete.body?.error,
+    );
+    assert.ok(
+      afterExpenseDelete.body.expenses.some(
+        (expense) =>
+          expense.original_expense_id === expenseIds[2] &&
+          expense.history_action === "deleted",
+      ),
+    );
+    assert.equal(
+      afterExpenseDelete.body.expenses.find(
+        (expense) =>
+          expense.id === expenseIds[2] &&
+          !expense.history_action,
+      ),
+      undefined,
+    );
 
     const deleteGroup = await call(
       env,
@@ -990,6 +1088,9 @@ test("random tips use cached quotes and client assets include the main controls"
       "showSignedInApp",
       "verifyEmailFromUrl",
       "resendVerificationBtn",
+      "pairedHistoryEntries",
+      "current-version-status",
+      "has-history-pair",
     ])
       assert.ok(
         app.includes(feature) || html.includes(feature),
