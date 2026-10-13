@@ -702,8 +702,8 @@ async function openGroup(groupId) {
 
 async function refreshAfterMutation(groupId) {
   activityPage = 1;
-  await load();
   await openGroup(groupId);
+  load().catch((error) => toast(error.message));
 }
 
 function isActiveGroupOwner() {
@@ -1308,7 +1308,10 @@ async function populateExpenseMembers(
   selected = [],
   paidBy = me.id,
 ) {
-  const group = await api(`/groups/${groupId}`);
+  const group =
+    activeGroup?.group?.id === Number(groupId)
+      ? { members: activeGroup.members }
+      : await api(`/groups/${groupId}/members`);
   const participants = selected.length
     ? new Set(selected.map(Number))
     : new Set(group.members.map((person) => person.id));

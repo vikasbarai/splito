@@ -1837,6 +1837,24 @@ export default {
       }
       if (
         parts[0] === "groups" &&
+        parts[2] === "members" &&
+        parts.length === 3 &&
+        request.method === "GET"
+      ) {
+        const groupId = id(parts[1]);
+        await ensureGroup(db, groupId, user.id);
+        const members = await db
+          .prepare(
+            "SELECT u.id,u.name,u.email,u.avatar_emoji,u.avatar_image,u.avatar_color FROM users u JOIN group_members gm ON gm.user_id=u.id WHERE gm.group_id=? ORDER BY u.name COLLATE NOCASE",
+          )
+          .bind(groupId)
+          .all();
+        return json(request, env, {
+          members: members.results,
+        });
+      }
+      if (
+        parts[0] === "groups" &&
         parts.length === 2 &&
         request.method === "GET"
       ) {

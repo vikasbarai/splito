@@ -594,6 +594,20 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
       invitedFriend.user.id,
       nonFriend.user.id,
     ];
+    const groupMembers = await call(
+      env,
+      `/groups/${groupId}/members`,
+      { token: owner.token },
+    );
+    assert.equal(groupMembers.status, 200);
+    assert.deepEqual(
+      new Set(
+        groupMembers.body.members.map(
+          (member) => member.id,
+        ),
+      ),
+      new Set(participants),
+    );
     const modes = [
       ["equal", undefined],
       [
