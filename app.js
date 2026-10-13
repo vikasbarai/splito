@@ -15,6 +15,8 @@ let settlementReceiptImage = "";
 let activityPage = 1;
 let tipRequest = 0;
 let settlementSuggestions = [];
+const groupEntryPageSize = 20;
+let activeGroupEntryLimit = groupEntryPageSize;
 const defaultAvatarColor = "#d76e47";
 const maxReceiptImageBytes = 500 * 1024;
 const apiTimeoutMs = 20000;
@@ -579,6 +581,14 @@ function settlementSummaryMarkup(payments) {
     .join("")}</div>`;
 }
 
+function groupLoadMoreMarkup(kind, pagination, loadedCount) {
+  const total = Number(pagination?.total) || 0;
+  const loaded = Math.min(Number(loadedCount) || 0, total);
+  if (!total || loaded >= total) return "";
+  const label = kind === "settlements" ? "settlements" : "expenses";
+  return `<div class="group-load-more"><span>Showing ${loaded} of ${total} ${label}</span><button class="entry-button" type="button" data-load-group-entries="${label}">Load more ${label}</button></div>`;
+}
+
 function render() {
   const groups = dash.groups || [];
   const net = groups.reduce(
@@ -684,8 +694,7 @@ function view(name) {
     });
 }
 
-async function openGroup(groupId) {
-  activeGroup = await api(`/groups/${groupId}`);
+function renderGroupDetail() {
   const group = activeGroup.group;
   const isGroupOwner =
     Number(group.created_by) === Number(me.id);
@@ -747,6 +756,11 @@ async function openGroup(groupId) {
         ),
       )
       .join("") || "<p>No expenses in this group yet.</p>";
+  $("#detailExpensesMore").innerHTML = groupLoadMoreMarkup(
+    "expenses",
+    activeGroup.expensePagination,
+    activeGroup.expenses?.length || 0,
+  );
   $("#detailSettlements").innerHTML =
     pairedHistoryEntries(
       activeGroup.settlements,
@@ -760,7 +774,43 @@ async function openGroup(groupId) {
         ),
       )
       .join("") || "<p>No settlements yet.</p>";
+  $("#detailSettlementsMore").innerHTML = groupLoadMoreMarkup(
+    "settlements",
+    activeGroup.settlementPagination,
+    activeGroup.settlements?.length || 0,
+  );
   view("group");
+}
+
+async function openGroup(groupId, entryLimit = groupEntryPageSize) {
+  activeGroupEntryLimit = entryLimit;
+  activeGroup = await api(
+    `/groups/${groupId}?entryPageSize=${entryLimit}`,
+  );
+  renderGroupDetail();
+}
+
+async function loadMoreGroupEntries() {
+  if (!activeGroup?.group?.id) return;
+  const existingExpenses = activeGroup.expenses || [];
+  const existingSettlements = activeGroup.settlements || [];
+  const next = await api(
+    `/groups/${activeGroup.group.id}?entryPageSize=${groupEntryPageSize}&expenseOffset=${existingExpenses.length}&settlementOffset=${existingSettlements.length}`,
+  );
+  activeGroup = {
+    ...next,
+    expenses: [...existingExpenses, ...(next.expenses || [])],
+    settlements: [
+      ...existingSettlements,
+      ...(next.settlements || []),
+    ],
+  };
+  activeGroupEntryLimit = Math.max(
+    groupEntryPageSize,
+    activeGroup.expenses.length,
+    activeGroup.settlements.length,
+  );
+  renderGroupDetail();
 }
 
 async function refreshAfterMutation(groupId) {
@@ -2763,6 +2813,9 @@ document.addEventListener("click", (event) => {
   const settleSummary = event.target.closest(
     "[data-settle-summary]",
   );
+  const loadGroupEntries = event.target.closest(
+    "[data-load-group-entries]",
+  );
   const editExpense = event.target.closest(
     "[data-edit-expense]",
   );
@@ -2842,6 +2895,14 @@ document.addEventListener("click", (event) => {
       openSettlementSuggestion(payment).catch((error) =>
         toast(error.message),
       );
+    return;
+  }
+  if (loadGroupEntries) {
+    loadGroupEntries.disabled = true;
+    loadMoreGroupEntries().catch((error) => {
+      loadGroupEntries.disabled = false;
+      toast(error.message);
+    });
     return;
   }
   if (editExpense) {

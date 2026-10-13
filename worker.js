@@ -66,6 +66,12 @@ function positiveInteger(value, fallback, maximum) {
     ? Math.min(number, maximum)
     : fallback;
 }
+function nonNegativeInteger(value, fallback, maximum) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0
+    ? Math.min(number, maximum)
+    : fallback;
+}
 const fallbackTips = [
   {
     quote:
@@ -925,7 +931,7 @@ async function archiveSettlement(
       settlement.amount_cents,
       settlement.settled_at,
       settlement.receipt_image,
-      settlement.created_at,
+      settlement.created_at || settlement.settled_at,
       action,
       userId,
     )
@@ -1860,6 +1866,21 @@ export default {
       ) {
         const groupId = id(parts[1]);
         await ensureGroup(db, groupId, user.id);
+        const entryPageSize = positiveInteger(
+          url.searchParams.get("entryPageSize"),
+          20,
+          50,
+        );
+        const expenseOffset = nonNegativeInteger(
+          url.searchParams.get("expenseOffset"),
+          0,
+          100000,
+        );
+        const settlementOffset = nonNegativeInteger(
+          url.searchParams.get("settlementOffset"),
+          0,
+          100000,
+        );
         const group = await db
             .prepare(
               "SELECT g.*,u.name AS owner_name FROM groups g JOIN users u ON u.id=g.created_by WHERE g.id=?",
@@ -1874,28 +1895,38 @@ export default {
             .all(),
           expenses = await db
             .prepare(
-              "SELECT e.*,u.name payer_name,NULL AS history_action,NULL AS archived_at,NULL AS archived_by_name FROM expenses e JOIN users u ON u.id=e.paid_by WHERE e.group_id=? AND e.deleted_at IS NULL ORDER BY e.expense_date DESC,e.created_at DESC",
+              "SELECT * FROM (SELECT e.id,NULL AS original_expense_id,e.group_id,e.description,e.emoji,e.split_method,e.amount_cents,e.paid_by,e.category,e.expense_date,e.notes,e.receipt_image,e.created_at,NULL AS history_action,NULL AS archived_at,NULL AS archived_by_name,u.name payer_name FROM expenses e JOIN users u ON u.id=e.paid_by WHERE e.group_id=? AND e.deleted_at IS NULL UNION ALL SELECT h.id,h.original_expense_id,h.group_id,h.description,h.emoji,h.split_method,h.amount_cents,h.paid_by,h.category,h.expense_date,h.notes,h.receipt_image,h.original_created_at AS created_at,h.history_action,h.archived_at,editor.name AS archived_by_name,u.name payer_name FROM expense_history h JOIN users u ON u.id=h.paid_by LEFT JOIN users editor ON editor.id=h.archived_by WHERE h.group_id=?) ORDER BY expense_date DESC,COALESCE(archived_at,created_at) DESC LIMIT ? OFFSET ?",
             )
-            .bind(groupId)
+            .bind(
+              groupId,
+              groupId,
+              entryPageSize,
+              expenseOffset,
+            )
             .all(),
-          expenseHistory = await db
+          expenseCount = await db
             .prepare(
-              "SELECT h.id,h.original_expense_id, h.group_id,h.description,h.emoji,h.split_method,h.amount_cents,h.paid_by,h.category,h.expense_date,h.notes,h.receipt_image,h.original_created_at AS created_at,h.history_action,h.archived_at,u.name payer_name,editor.name AS archived_by_name FROM expense_history h JOIN users u ON u.id=h.paid_by LEFT JOIN users editor ON editor.id=h.archived_by WHERE h.group_id=? ORDER BY h.expense_date DESC,h.archived_at DESC",
+              "SELECT (SELECT COUNT(*) FROM expenses WHERE group_id=? AND deleted_at IS NULL) + (SELECT COUNT(*) FROM expense_history WHERE group_id=?) AS total",
             )
-            .bind(groupId)
-            .all(),
+            .bind(groupId, groupId)
+            .first(),
           settlements = await db
             .prepare(
-              "SELECT s.*,a.name payer_name,b.name payee_name,NULL AS history_action,NULL AS archived_at,NULL AS archived_by_name FROM settlements s JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to WHERE s.group_id=? AND s.deleted_at IS NULL ORDER BY s.settled_at DESC",
+              "SELECT * FROM (SELECT s.id,NULL AS original_settlement_id,s.group_id,s.paid_by,s.paid_to,s.amount_cents,s.settled_at,s.receipt_image,s.settled_at AS created_at,NULL AS history_action,NULL AS archived_at,NULL AS archived_by_name,a.name payer_name,b.name payee_name FROM settlements s JOIN users a ON a.id=s.paid_by JOIN users b ON b.id=s.paid_to WHERE s.group_id=? AND s.deleted_at IS NULL UNION ALL SELECT h.id,h.original_settlement_id,h.group_id,h.paid_by,h.paid_to,h.amount_cents,h.settled_at,h.receipt_image,h.original_created_at AS created_at,h.history_action,h.archived_at,editor.name AS archived_by_name,a.name payer_name,b.name payee_name FROM settlement_history h JOIN users a ON a.id=h.paid_by JOIN users b ON b.id=h.paid_to LEFT JOIN users editor ON editor.id=h.archived_by WHERE h.group_id=?) ORDER BY settled_at DESC,COALESCE(archived_at,created_at) DESC LIMIT ? OFFSET ?",
             )
-            .bind(groupId)
+            .bind(
+              groupId,
+              groupId,
+              entryPageSize,
+              settlementOffset,
+            )
             .all(),
-          settlementHistory = await db
+          settlementCount = await db
             .prepare(
-              "SELECT h.id,h.original_settlement_id,h.group_id,h.paid_by,h.paid_to,h.amount_cents,h.settled_at,h.receipt_image,h.original_created_at AS created_at,h.history_action,h.archived_at,a.name payer_name,b.name payee_name,editor.name AS archived_by_name FROM settlement_history h JOIN users a ON a.id=h.paid_by JOIN users b ON b.id=h.paid_to LEFT JOIN users editor ON editor.id=h.archived_by WHERE h.group_id=? ORDER BY h.settled_at DESC,h.archived_at DESC",
+              "SELECT (SELECT COUNT(*) FROM settlements WHERE group_id=? AND deleted_at IS NULL) + (SELECT COUNT(*) FROM settlement_history WHERE group_id=?) AS total",
             )
-            .bind(groupId)
-            .all(),
+            .bind(groupId, groupId)
+            .first(),
           invites = await db
             .prepare(
               "SELECT id,email,created_at,accepted_at,add_to_friends FROM invites WHERE group_id=? ORDER BY CASE WHEN accepted_at IS NULL THEN 0 ELSE 1 END,created_at DESC",
@@ -1906,57 +1937,28 @@ export default {
           expense.splits = (
             await db
               .prepare(
-                "SELECT s.*,u.name FROM expense_splits s JOIN users u ON u.id=s.user_id WHERE expense_id=?",
+                expense.history_action
+                  ? "SELECT s.*,u.name FROM expense_history_splits s JOIN users u ON u.id=s.user_id WHERE history_id=?"
+                  : "SELECT s.*,u.name FROM expense_splits s JOIN users u ON u.id=s.user_id WHERE expense_id=?",
               )
               .bind(expense.id)
               .all()
           ).results;
-        for (const expense of expenseHistory.results)
-          expense.splits = (
-            await db
-              .prepare(
-                "SELECT s.*,u.name FROM expense_history_splits s JOIN users u ON u.id=s.user_id WHERE history_id=?",
-              )
-              .bind(expense.id)
-              .all()
-          ).results;
-        const allExpenses = [
-          ...expenses.results,
-          ...expenseHistory.results,
-        ].sort(
-          (left, right) =>
-            String(
-              right.expense_date || right.archived_at || "",
-            ).localeCompare(
-              String(
-                left.expense_date || left.archived_at || "",
-              ),
-            ) ||
-            String(
-              right.archived_at || right.created_at || "",
-            ).localeCompare(
-              String(
-                left.archived_at || left.created_at || "",
-              ),
-            ),
-        );
-        const allSettlements = [
-          ...settlements.results,
-          ...settlementHistory.results,
-        ].sort((left, right) =>
-          String(
-            right.settled_at || right.archived_at || "",
-          ).localeCompare(
-            String(
-              left.settled_at || left.archived_at || "",
-            ),
-          ),
-        );
         return json(request, env, {
           group,
           members: members.results,
-          expenses: allExpenses,
-          settlements: allSettlements,
+          expenses: expenses.results,
+          settlements: settlements.results,
+          expensePagination: {
+            offset: expenseOffset,
+            pageSize: entryPageSize,
+            total: Number(expenseCount?.total) || 0,
+          },
+          settlementPagination: {
+            offset: settlementOffset,
+            pageSize: entryPageSize,
+            total: Number(settlementCount?.total) || 0,
+          },
           invites: invites.results,
           balances: await balances(db, groupId),
         });

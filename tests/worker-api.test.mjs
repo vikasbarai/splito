@@ -719,6 +719,40 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
     assert.equal(group.status, 200, group.body?.error);
     assert.equal(group.body.group.owner_name, "Owner");
     assert.equal(group.body.members.length, 4);
+    const firstExpensePage = await call(
+      env,
+      `/groups/${groupId}?entryPageSize=2`,
+      { token: owner.token },
+    );
+    assert.equal(
+      firstExpensePage.status,
+      200,
+      firstExpensePage.body?.error,
+    );
+    assert.equal(firstExpensePage.body.expenses.length, 2);
+    assert.equal(
+      firstExpensePage.body.expensePagination.total,
+      group.body.expenses.length,
+    );
+    const secondExpensePage = await call(
+      env,
+      `/groups/${groupId}?entryPageSize=2&expenseOffset=2`,
+      { token: owner.token },
+    );
+    assert.equal(
+      secondExpensePage.status,
+      200,
+      secondExpensePage.body?.error,
+    );
+    assert.equal(secondExpensePage.body.expenses.length, 2);
+    assert.notDeepEqual(
+      firstExpensePage.body.expenses.map(
+        (expense) => expense.id,
+      ),
+      secondExpensePage.body.expenses.map(
+        (expense) => expense.id,
+      ),
+    );
     const editedExpenseHistory = group.body.expenses.find(
       (expense) =>
         expense.original_expense_id === expenseIds[1] &&
@@ -871,6 +905,20 @@ test("groups, friends, invitations, expenses, settlements, and owner permissions
     assert.equal(
       deletedSettlementHistory.amount_cents,
       400,
+    );
+    const settlementPage = await call(
+      env,
+      `/groups/${groupId}?entryPageSize=1`,
+      { token: owner.token },
+    );
+    assert.equal(
+      settlementPage.status,
+      200,
+      settlementPage.body?.error,
+    );
+    assert.equal(settlementPage.body.settlements.length, 1);
+    assert.ok(
+      settlementPage.body.settlementPagination.total >= 2,
     );
     assert.ok(
       afterSettlementDelete.body.settlements.some(
@@ -1108,6 +1156,10 @@ test("random tips use cached quotes and client assets include the main controls"
       "settlementPlan",
       "settlementSummary",
       "data-settle-summary",
+      "entryPageSize",
+      "expensePagination",
+      "data-load-group-entries",
+      "detailExpensesMore",
     ])
       assert.ok(
         app.includes(feature) || html.includes(feature),
