@@ -14,6 +14,7 @@ let expenseReceiptImage = "";
 let settlementReceiptImage = "";
 let activityPage = 1;
 let tipRequest = 0;
+let settlementSuggestions = [];
 const defaultAvatarColor = "#d76e47";
 const maxReceiptImageBytes = 500 * 1024;
 const apiTimeoutMs = 20000;
@@ -521,6 +522,63 @@ function unsettledNonFriendMarkup(person, index) {
   return `<div class="friend">${avatar(person, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.shared_group_count} shared group${person.shared_group_count === 1 ? "" : "s"} · Not in your Friends list</small></div><div class="friend-balance ${balance < 0 ? "negative" : ""}"><small>${status}</small><b>${money(balance)}</b><span class="friend-actions"><button class="entry-button settle-friend-button" type="button" data-settle-friend="${person.id}">Settle</button><button class="entry-button member-friend-button" type="button" data-add-overview-friend="${person.id}">Add friend</button></span></div></div>`;
 }
 
+function settlementPlan(balances) {
+  const creditors = balances
+    .filter((person) => Number(person.balance_cents) > 0)
+    .map((person) => ({
+      ...person,
+      remaining: Number(person.balance_cents),
+    }))
+    .sort(
+      (left, right) => right.remaining - left.remaining,
+    );
+  const debtors = balances
+    .filter((person) => Number(person.balance_cents) < 0)
+    .map((person) => ({
+      ...person,
+      remaining: Math.abs(Number(person.balance_cents)),
+    }))
+    .sort(
+      (left, right) => right.remaining - left.remaining,
+    );
+  const payments = [];
+  let creditorIndex = 0;
+  let debtorIndex = 0;
+  while (
+    creditorIndex < creditors.length &&
+    debtorIndex < debtors.length
+  ) {
+    const creditor = creditors[creditorIndex];
+    const debtor = debtors[debtorIndex];
+    const amount = Math.min(
+      creditor.remaining,
+      debtor.remaining,
+    );
+    if (amount > 0)
+      payments.push({
+        from: debtor,
+        to: creditor,
+        amount_cents: amount,
+      });
+    creditor.remaining -= amount;
+    debtor.remaining -= amount;
+    if (creditor.remaining <= 0) creditorIndex += 1;
+    if (debtor.remaining <= 0) debtorIndex += 1;
+  }
+  return payments;
+}
+
+function settlementSummaryMarkup(payments) {
+  if (!payments.length)
+    return '<p class="settlement-empty">Everyone is settled up in this group.</p>';
+  return `<div class="settlement-table">${payments
+    .map(
+      (payment, index) =>
+        `<div class="settlement-row"><div class="settlement-person">${avatar(payment.from, index)}<strong>${esc(payment.from.name)}</strong></div><span class="settlement-arrow">pays</span><div class="settlement-person">${avatar(payment.to, index + 1)}<strong>${esc(payment.to.name)}</strong></div><div class="settlement-amount">${money(payment.amount_cents)}</div><button class="entry-button" type="button" data-settle-summary="${index}">Record</button></div>`,
+    )
+    .join("")}</div>`;
+}
+
 function render() {
   const groups = dash.groups || [];
   const net = groups.reduce(
@@ -654,6 +712,11 @@ async function openGroup(groupId) {
       return `<div class="friend">${avatar(person, index)}<div class="friend-info"><strong>${esc(person.name)}</strong><small>${person.balance_cents > 0 ? "is owed" : person.balance_cents < 0 ? "owes" : "is settled up"}</small></div><div class="friend-balance ${person.balance_cents < 0 ? "negative" : ""}"><b>${money(person.balance_cents)}</b>${friendAction}</div></div>`;
     })
     .join("");
+  settlementSuggestions = settlementPlan(
+    activeGroup.balances,
+  );
+  $("#settlementSummary").innerHTML =
+    settlementSummaryMarkup(settlementSuggestions);
   $("#detailInvites").innerHTML =
     (activeGroup.invites || [])
       .map((invite) => {
@@ -1871,7 +1934,10 @@ async function populateSettlementMembers(
     autoFillBalance = false,
   } = {},
 ) {
-  const group = await api(`/groups/${groupId}`);
+  const group =
+    activeGroup?.group?.id === Number(groupId)
+      ? { members: activeGroup.members }
+      : await api(`/groups/${groupId}/members`);
   const payer = $("#settlePayer");
   const payee = $("#settlePayee");
   payer.innerHTML = group.members
@@ -2010,6 +2076,39 @@ async function openSettlement(entry, directFriend) {
       "This group needs at least two members to record a payment.",
     );
   }
+  openDialog($("#settleDialog"));
+}
+
+async function openSettlementSuggestion(payment) {
+  if (!activeGroup)
+    return toast(
+      "Open a group before recording a payment.",
+    );
+  const form = $("#settleForm");
+  const groupSelect = $("#settleGroup");
+  form.reset();
+  settlementReceiptImage = "";
+  $("#settlementReceipt").value = "";
+  updateReceiptPreview("settlement");
+  form.elements.entryId.value = "";
+  $("#settleDialogEyebrow").textContent =
+    "SETTLE A BALANCE";
+  $("#settleDialogTitle").textContent = "Record a payment";
+  $("#settleSubmit").textContent = "Record payment";
+  groupSelect.disabled = false;
+  groupSelect.innerHTML = `<option value="${activeGroup.group.id}">${esc(activeGroup.group.emoji)} ${esc(activeGroup.group.name)}</option>`;
+  groupSelect.value = activeGroup.group.id;
+  form.elements.amount.value = (
+    payment.amount_cents / 100
+  ).toFixed(2);
+  form.elements.settledAt.value = today();
+  await populateSettlementMembers(activeGroup.group.id, {
+    paidBy: payment.from.id,
+    paidTo: payment.to.id,
+  });
+  $("#settleContext").hidden = false;
+  $("#settleContext").textContent =
+    `${payment.from.name} pays ${payment.to.name} ${money(payment.amount_cents)} to settle this group.`;
   openDialog($("#settleDialog"));
 }
 
@@ -2661,6 +2760,9 @@ document.addEventListener("click", (event) => {
   const settleFriend = event.target.closest(
     "[data-settle-friend]",
   );
+  const settleSummary = event.target.closest(
+    "[data-settle-summary]",
+  );
   const editExpense = event.target.closest(
     "[data-edit-expense]",
   );
@@ -2727,6 +2829,17 @@ document.addEventListener("click", (event) => {
     );
     if (friend)
       openSettlement(null, friend).catch((error) =>
+        toast(error.message),
+      );
+    return;
+  }
+  if (settleSummary) {
+    const payment =
+      settlementSuggestions[
+        Number(settleSummary.dataset.settleSummary)
+      ];
+    if (payment)
+      openSettlementSuggestion(payment).catch((error) =>
         toast(error.message),
       );
     return;

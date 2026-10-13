@@ -1105,6 +1105,9 @@ test("random tips use cached quotes and client assets include the main controls"
       "pairedHistoryEntries",
       "current-version-status",
       "has-history-pair",
+      "settlementPlan",
+      "settlementSummary",
+      "data-settle-summary",
     ])
       assert.ok(
         app.includes(feature) || html.includes(feature),
